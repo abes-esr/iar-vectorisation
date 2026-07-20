@@ -1,0 +1,6 @@
+.env*
+labo
+data
+volumes
+venv
+!.env-dist
