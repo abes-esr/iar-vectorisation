@@ -174,4 +174,4 @@ python test/test_preflight_checks.py --action update --conceptsORchains concepts
 
 ### 2. Données de Test (`test/data/`)
 
-- [test_data.csv](file:///c:/Projets/iar/iar-vectorisation/test/data/test_data.csv) : Fichier de référence contenant la liste de PPN exclus de l'entraînement (et donc du calcul de la moyenne vectorielle par concept). Il garantit que le pipeline d'ingestion n'introduit aucun biais sur l'ensemble d'évaluation (pas de _data leakage_).
+- test*data.csv : Fichier de référence contenant la liste de PPN exclus de l'entraînement (et donc du calcul de la moyenne vectorielle par concept). Il garantit que le pipeline d'ingestion n'introduit aucun biais sur l'ensemble d'évaluation (pas de \_data leakage*).
