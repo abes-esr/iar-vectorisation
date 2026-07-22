@@ -1,6 +1,6 @@
 .env*
 labo
-data
+./data
 volumes
 venv
 !.env-dist

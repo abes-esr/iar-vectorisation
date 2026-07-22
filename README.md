@@ -13,6 +13,7 @@ Ce module constitue le pipeline de **vectorisation batch et d'ingestion vectorie
 - [Endpoints du Web Service REST (`load_qdrant_ws.py`)](#-endpoints-du-web-service-rest)
 - [Pipeline de Vectorisation Batch (`rameau_vectorize.py`)](#-pipeline-de-vectorisation-batch)
 - [Installation & Déploiement](#-installation--déploiement)
+- [Tests & Évaluation](#-tests--évaluation)
 
 ---
 
@@ -154,3 +155,23 @@ pip install -r requirements.txt
 ```bash
 python -m uvicorn load_qdrant_ws:app --host 0.0.0.0 --port 8100
 ```
+
+---
+
+## 🧪 Tests & Évaluation
+
+Le dossier test/ contient les scripts de validation technique de l'environnement de vectorisation.
+
+### 1. Script de Vérification Pré-Vol (`test_preflight_checks.py`)
+
+Ce script s'assure que la machine dispose des prérequis matériels nécessaires (mémoire RAM disponible) et valide la cohérence des arguments passés en ligne de commande pour le pipeline de vectorisation batch (`rameau_vectorize.py`). Il évite les plantages système en plein milieu d'une exécution de vectorisation lourde.
+
+**Exécution :**
+
+```bash
+python test/test_preflight_checks.py --action update --conceptsORchains concepts --alias_model allMin --avec_these only_mono
+```
+
+### 2. Données de Test (`test/data/`)
+
+- [test_data.csv](file:///c:/Projets/iar/iar-vectorisation/test/data/test_data.csv) : Fichier de référence contenant la liste de PPN exclus de l'entraînement (et donc du calcul de la moyenne vectorielle par concept). Il garantit que le pipeline d'ingestion n'introduit aucun biais sur l'ensemble d'évaluation (pas de _data leakage_).
