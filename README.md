@@ -160,7 +160,7 @@ python -m uvicorn load_qdrant_ws:app --host 0.0.0.0 --port 8100
 
 ## 🧪 Tests & Évaluation
 
-Le dossier test/ contient les scripts de validation technique de l'environnement de vectorisation.
+Le dossier [test/](test/) contient les scripts de validation technique de l'environnement de vectorisation.
 
 ### 1. Script de Vérification Pré-Vol (`test_preflight_checks.py`)
 
@@ -174,4 +174,4 @@ python test/test_preflight_checks.py --action update --conceptsORchains concepts
 
 ### 2. Données de Test (`test/data/`)
 
-- test*data.csv : Fichier de référence contenant la liste de PPN exclus de l'entraînement (et donc du calcul de la moyenne vectorielle par concept). Il garantit que le pipeline d'ingestion n'introduit aucun biais sur l'ensemble d'évaluation (pas de \_data leakage*).
+- [test_data.csv](test/data/test_data.csv) : Fichier de référence contenant la liste de PPN exclus de l'entraînement (et donc du calcul de la moyenne vectorielle par concept). Il garantit que le pipeline d'ingestion n'introduit aucun biais sur l'ensemble d'évaluation (pas de _data leakage_).
