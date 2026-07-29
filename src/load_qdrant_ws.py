@@ -2,7 +2,7 @@ import os
 import docker
 import aiofiles
 from pathlib import Path
-from fastapi import FastAPI, UploadFile, File, Response, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from dotenv import load_dotenv
 

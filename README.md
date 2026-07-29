@@ -1,6 +1,6 @@
 # ⚙️ Service de Vectorisation & Ingestion Qdrant RAMEAU
 
-Ce module constitue le pipeline de **vectorisation batch et d'ingestion vectorielle** pour le projet RAMEAU de l'ABES. Il prend en entrée des exports de notices bibliographiques (RAMEAU), calcule les représentations vectorielles (_embeddings_) via des modèles de Transformers, effectue des agrégations par moyenne de vecteurs sur les vedettes-matières, et alimente la base de données vectorielle **Qdrant** ou les index FAISS.
+Ce module constitue le pipeline de **vectorisation batch et d'ingestion vectorielle** pour le projet RAMEAU de l'ABES. Il prend en entrée des exports de notices bibliographiques (RAMEAU), calcule les représentations vectorielles (_embeddings_) via des modèles de Transformers, effectue des agrégations par moyenne de vecteurs sur les vedettes-matières, et alimente la base de données vectorielle **Qdrant**.
 
 ---
 
