@@ -1,0 +1,51 @@
+# ==============================================================================
+# Étape de Base (base)
+# ==============================================================================
+FROM python:3.10-slim AS base
+
+# Empêcher la création de fichiers .pyc et activer la sortie immédiate des logs
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONPATH=/app:/app/src
+
+WORKDIR /app
+
+# Installation des dépendances système minimales
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copie et installation des dépendances Python
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Création d'un utilisateur non-root pour la sécurité
+RUN useradd -u 1000 -m -s /bin/bash appuser && \
+    mkdir -p /app/data /app/volumes && \
+    chown -R appuser:appuser /app
+
+# ==============================================================================
+# Étape de Production (production / app)
+# ==============================================================================
+FROM base AS production
+
+# Copie des sources de l'application
+COPY --chown=appuser:appuser src/ /app/src/
+
+# Pour faciliter l'exécution directe des scripts à la racine du conteneur
+RUN ln -s /app/src/load_qdrant_ws.py /app/load_qdrant_ws.py && \
+    ln -s /app/src/rameau_vectorize.py /app/rameau_vectorize.py && \
+    ln -s /app/src/config.py /app/config.py
+
+USER appuser
+
+EXPOSE 8100
+
+# Vérification de l'état de santé du service
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+    CMD curl -f http://localhost:8100/ || exit 1
+
+# Commande par défaut : lancement du web service FastAPI
+CMD ["uvicorn", "load_qdrant_ws:app", "--host", "0.0.0.0", "--port", "8100"]

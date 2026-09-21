@@ -1,0 +1,35 @@
+# Environnements virtuels
+venv/
+.venv/
+env/
+
+# Fichiers Python compilés
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Données volumineuses et temporaires
+data/
+volumes/
+*.pkl
+*.csv
+*.tsv
+*.txt
+*.ini
+!global_init.ini
+
+# Configuration locale & secrets
+.env
+.env.local
+.env.*.local
+
+# Git & CI/CD
+.git/
+.gitignore
+.github/
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

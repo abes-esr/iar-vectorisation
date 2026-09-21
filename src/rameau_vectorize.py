@@ -1,305 +1,783 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-import os
+#docker
+'''
+sudo docker images
+docker network create mon_reseau
+sudo docker run -p 6333:6333  --network mon_reseau  -d -v /home/ubuntu/qdrant/data:/qdrant/storage     qdrant/qdrant
+sudo docker rmi -f 64d7215c2aa0
+
+pour le service web
+sudo docker run --network mon_reseau --gpus all -v /home/ubuntu/cbd/docker/rameau_service:/app -i -t -p 8069:8069 fb2dff3dae3b
+
+
+pour autoriser le repertoire en ecriture a ubuntu , sur le repertoire feire :
+sudo chown -R ubuntu: "$PWD"
+pour builder les eux
+sudo docker build -t rameau_service:v1 .
+sudo docker build -t rameau_vectorize_service:v1 .
+ si pas root: sudo docker run --network mon_reseau --gpus all -v /home/ubuntu/cbd/docker/rameau_vectorize_service:/app -u $(id -u):$(id -g) -i -t -p 8100:8100 fb2dff3dae3b
+
+ sudo docker run --network mon_reseau --gpus all -v /home/ubuntu/cbd/docker/rameau_vectorize_service:/app -u $(id -u):$(id -g) -i -t -p 8100:8100 fb2dff3dae3b
+pour recuperer le localhost de qdrant il faut faire un ifconfig recuperer l'ip du docker et le mettre dans global_init.ini
+'''
+
+# la procedure oracle de traitement sur la base xml est QE_EXPORT_RAMEAU
+# pour initier les serveurs ; 
+# cd /opt ; source jupyter/bin/activate ; cd /home/ubuntu/cbd
+# lancer le service de chargement et de lancement de la vectorisation il ecoute sur le port 8100:
+# python load_qdrant_ws.py 
+# url de test 
+# http://152.228.161.151:8100/lanceVectorisation/?action=update1&conceptsORchains=concepts&alias_model=allMin&avec_these=only_mono
+
+# lancer le service wided de test il ecoute sur le port 8068:
+# cd /opt ; source jupyter/bin/activate ; cd /home/ubuntu/yann/webservice
+# python wided-test_cbd3.py
+#pour tester http://152.228.161.151:8068/subject_indexation/?docId=NULL&Title=la%20radio&Summary=&models=victor1_concept,victor2,victor3_chain&aggregationType=intersection2models,llm&subjects&MaxCount=6&Agent=RCR&vocabulary=rameau&Format=text
+
 import re
-import sys
-import pickle
-import optparse
-import configparser
+from qdrant_client import models, QdrantClient
+from sentence_transformers import SentenceTransformer
 import pandas as pd
 import numpy as np
+import pickle
+from datetime import datetime 
 from pathlib import Path
-from datetime import datetime
-from dotenv import load_dotenv
+import os
+import configparser
+import optparse
+import sys
+try:
+    import config
+except ImportError:
+    from src import config
 
-from qdrant_client import QdrantClient, models
-from qdrant_client.models import VectorParams, Distance
-from sentence_transformers import SentenceTransformer
 
-load_dotenv()
+# In[5]:
 
-
-def launch(action_in, conceptsORchains, alias_model, avec_these):
-    root = ''
-    root1 = ''
+def launch(action_in, conceptsORchains, alias_model,avec_these):
+    
+    root=''
+    root1=''
+    #cwd = str(Path.cwd())
     cwd = str(Path.cwd())
 
-    if "/app" in cwd:
-        root = '/app/'
-        root1 = '/app/'
-
-    adress_qdrant = os.getenv("QDRANT_HOST", "localhost")
-    port_qdrant = int(os.getenv("QDRANT_PORT", 6333))
-    action = action_in
-    nettoie_file_trv = True
+    print(cwd)
+    if "/app" in cwd :
+        root='/app/'
+        root1='/app/'
+    adress_qdrant=config.QDRANT_HOST
+    port_qdrant=config.QDRANT_PORT
+    action=action_in
+    #laisser a true pour que les updates puissent passer
+    nettoie_file_trv=True
     train_filename = "export_rameau"
-    nb_lots_de_moyenne = 100
-
-    bibprepared_filename = f"{train_filename}_{conceptsORchains}_{alias_model}_{avec_these}"
-    RameauVectors = f"{conceptsORchains}_{alias_model}_{avec_these}"
-
+    #si 100 alors on ne decoupe pas, si 10 alors on decoupe par (nb fichier:82) % 10 soit 8 fichiers de moyennes qui seront ensuite
+    # re-moyennises en 1 seul
+    #pour plus de prcision et si assez de memoire alors mettre 100
+    nb_lots_de_moyenne=100
+    
+    bibprepared_filename = train_filename+"_"+conceptsORchains+'_'+alias_model+'_'+avec_these
+    
+    RameauVectors = conceptsORchains+'_'+alias_model+'_'+avec_these
     try:
-        date_init_file = str(datetime.fromtimestamp(os.path.getmtime("export_rameau.csv")))
-    except FileNotFoundError:
-        date_init_file = "pas de fichier export_rameau.csv"
-    print(f"date file init: {date_init_file}")
-
+        date_init_file =str(datetime.fromtimestamp(os.path.getmtime("export_rameau.csv")))
+    except:
+        date_init_file="pas de fichier export_rameau.csv"
+    print("date file init:"+date_init_file)
     try:
-        date_update_file = str(datetime.fromtimestamp(os.path.getmtime("export_rameau_update.csv")))
-    except FileNotFoundError:
-        date_update_file = "pas de fichier export_rameau_update.csv"
-    print(f"date file update: {date_update_file}")
-
+        date_update_file =str(datetime.fromtimestamp(os.path.getmtime("export_rameau_update.csv")))
+    except:
+        date_update_file="pas de fichier export_rameau_update.csv"
+    print("date file update:"+date_update_file)
     config_init = configparser.ConfigParser()
     try:
-        config_init.read(root + bibprepared_filename + '_init.ini')
-        date_init_file_last = config_init['DEFAULT']['date_mod']
-    except Exception:
-        date_init_file_last = "null"
+        config_init.read(root+bibprepared_filename+'_init.ini')
+        date_init_file_last=config_init['DEFAULT']['date_mod']
+    except:
+        date_init_file_last="null"
         config_init['DEFAULT'] = {'date_mod': 'null'}
-        with open(root + bibprepared_filename + '_init.ini', 'w') as configfile:
+        with open(root+bibprepared_filename+'_init.ini', 'w') as configfile:
             config_init.write(configfile)
-
-    print(f"adress_qdrant: {adress_qdrant}:{port_qdrant}")
-
+    try:
+        config_init.read('global_init.ini')
+        if 'adress_qdrant' in config_init['DEFAULT']:
+            adress_qdrant=config_init['DEFAULT']['adress_qdrant']
+    except:
+        pass
+    
+    print("adress_qdrant:"+adress_qdrant)
+    print("port_qdrant:"+str(port_qdrant))
+    
+    print("last date file init:"+date_init_file_last)
     config_update = configparser.ConfigParser()
     try:
-        config_update.read(root + bibprepared_filename + '_update.ini')
-        date_update_file_last = config_update['DEFAULT']['date_mod']
-    except Exception:
-        date_update_file_last = "null"
+        config_update.read(root+bibprepared_filename+'_update.ini')
+        date_update_file_last=config_update['DEFAULT']['date_mod']
+    except:
+        date_update_file_last="null"
         config_update['DEFAULT'] = {'date_mod': 'null'}
-        with open(root + bibprepared_filename + '_update.ini', 'w') as configfile:
+        with open(root+bibprepared_filename+'_update.ini', 'w') as configfile:
             config_update.write(configfile)
-
-    update = True
-    if action == "init":
+    
+    print("last date file update:"+date_update_file_last)
+    update=True
+    #ICI update ou pas
+    if (action=="init"):
         print("mode init")
-        update = False
-    elif action == "update":
+        update=False
+    if (action=="update"):
         print("mode update")
-        update = True
-    elif action == "auto":
+        update=True
+    if (action=="auto"):
         if date_init_file != date_init_file_last:
-            action = "init"
-            update = False
+            action="init"
             print("mode init")
-        elif date_update_file != date_update_file_last:
-            action = "update"
-            update = True
-            print("mode update")
         else:
-            print("rien à traiter, on quitte.")
-            return
-
-    size_csv = 0
-    size_csv_update = 0
-    size_origine = 0
-    size_origine_new = 0
-
-    if action in ["init", "update", "restore"]:
-        if update:
+            if date_update_file != date_update_file_last:
+                print("mode update")
+                action="update"
+                update=True
+            else:
+                print("rien a traiter on quitte")
+                del update
+                #exit()
+    size_csv=0
+    size_csv_update=0
+    size_origine=0
+    size_origine_new=0
+    # In[6]:
+    
+    if action =="init" or action =="update" or action =="restore"  :
+        # Instancier le modèle de l'encodeur de phrases,
+        
+        #emb_model = 'intfloat/multilingual-e5-small'   # pas mal du tout, à réévaluer
+        #les fichiers update doivent finir par _update et porter le meme nom initial que le fichier initial
+        if update==True:
             train_filename = "export_rameau_update"
         else:
             train_filename = "export_rameau"
-
-        if alias_model == 'allMin':
+            
+        if (alias_model=='allMin'):
             emb_model = 'all-MiniLM-L6-v2'
-        elif alias_model == 'distiluse':
+        if (alias_model=='distiluse'):
             emb_model = 'sentence-transformers/distiluse-base-multilingual-cased-v2'
-        elif alias_model == 'e5-large':
+        if (alias_model=='e5-large'):
             emb_model = 'intfloat/multilingual-e5-large'
-
-        encoder = SentenceTransformer(emb_model)
-
-    if action in ["init", "update"]:
+        
+        #encoder = SentenceTransformer(emb_model, device='cuda')  # pas mal du tout, à réévaluer, cbd ajout cuda
+        encoder = SentenceTransformer(emb_model)  # pas mal du tout, à réévaluer, cbd ajout cuda
+    
+    
+    # In[7]:
+    
+    if action =="init" or action =="update"  :
+        
+        
         def encode_concepts(text):
-            return text.replace(' -- ', ';')
-
-        def encode_special(text):
-            return text.replace('_', '#u#').replace('"', '#d#').replace('\'', '#c#').replace(' ', '_').replace(',', '_').replace(';', ',')
-
-        columns = ['PPN', 'THESE', 'TITRE', 'RESUME', 'RAMEAU', 'lang']
-        print(f"\nChargement du fichier tabulé : {train_filename}.csv")
-        training_data = pd.read_csv(root + train_filename + ".csv", sep='\t', header=None, names=columns)
-
-        if avec_these == 'only_theses':
-            training_data = training_data[training_data.THESE.notnull()]
-        elif avec_these == 'only_mono':
-            training_data = training_data[training_data.THESE.isnull()]
-
-        if conceptsORchains == 'concepts':
+            res = text.replace(' -- ',';') 
+            return res
+        
+        columns = ['PPN','THESE','TITRE','RESUME','RAMEAU','lang']
+        #chargement fichier tabule
+        print("")
+        print("")
+        print("")
+        print("")
+        print("chargement fichier tabulé: "+train_filename+".csv et preparation")
+        training_data=pd.read_csv(root+train_filename+".csv",sep='\t',header=None, names=columns)
+        #supprime mono
+        if (avec_these =='only_theses'):
+            training_data=training_data[training_data.THESE.notnull()]
+        #supprime theses
+        if (avec_these =='only_mono'):
+            training_data=training_data[training_data.THESE.isnull()]
+        #on prepare pour pouvoir spliter 
+        if (conceptsORchains == 'concepts'):
             training_data['RAMEAU'] = training_data['RAMEAU'].apply(encode_concepts)
-
-        training_data['TITRE'] = training_data['TITRE'].apply(lambda x: str(x).replace("\x98", "").replace("\x9c", ""))
+        training_data['TITRE'] = training_data['TITRE'].apply(lambda x: x.replace("\x98","").replace("\x9c", ""))
+        def encode_special(text):
+            res = text.replace('_','#u#').replace('"','#d#').replace('\'','#c#').replace(' ','_').replace(',','_').replace(';',',') 
+            return res
         training_data['RAMEAU'] = training_data['RAMEAU'].apply(encode_special)
-        training_data["DESCR"] = training_data['TITRE'].astype(str) + ", " + training_data["RESUME"].astype(str)
-
-        print(f"Sauvegarde dans le fichier : {bibprepared_filename}.pkl")
-        training_data.to_pickle(root + bibprepared_filename + '.pkl')
-        size_csv = len(training_data)
-
-        training_data = pd.read_pickle(root + bibprepared_filename + '.pkl')
-        training_data = training_data[['PPN', 'DESCR', 'RAMEAU']]
-
-        if len(training_data.index) < 2:
-            print("Les données à charger sont vides, fin du traitement.")
-            return
-
+        training_data["DESCR"] = training_data['TITRE'].astype(str) +", "+ training_data["RESUME"]
+        print("")
+        print("")
+        print("")
+        print("")
+        print("sauvegarde dans fichier: "+bibprepared_filename+'.pkl')
+        training_data.to_pickle(root+bibprepared_filename+'.pkl')
+        size_csv=len(training_data)
+        
+        
+        training_data.info()
+        print(training_data[training_data['PPN']== '257658238'])
+        #del training_data
+        
+        
+        # In[8]:
+        
+        print("")
+        print("")
+        print("")
+        print("")
+        print("chargement fichier prepare:"+bibprepared_filename+'.pkl')
+        training_data = pd.read_pickle(root+bibprepared_filename+'.pkl')
+        training_data.info()
+        training_data = training_data[['PPN','DESCR', 'RAMEAU']]
+        
+        if len(training_data.index) <2:
+            print("les données a charger sont vides on quit")
+            quit()
+        # ## Calcul des embeddings
+        
+        # In[9]:
+        
+        
+        start_time = datetime.now() 
+        
+        # Fonction pour encoder les données en paquets
+        batch_size = 5000
+        
+        # Fonction pour encoder les données en paquets
         def encode_batches(data, encoder, batch_size):
+            print(len(data))
+            # Initialiser une liste pour stocker les batches encodés
             encoded_batches = []
+            # Calculer le nombre total de batches nécessaires pour traiter toutes les données
             num_batches = int(np.ceil(len(data) / batch_size))
+            print(num_batches)
+        
+            # Parcourir chaque batch
             for i in range(num_batches):
+                # Sélectionner les données pour le batch actuel
+                #print("encode",i)
                 batch_data = data.iloc[i * batch_size: (i + 1) * batch_size]
+                # Encoder le texte dans le batch actuel, en montrant une barre de progression
+                #print("encode2",i)
                 encoded_batch = encoder.encode(batch_data['DESCR'].tolist(), show_progress_bar=False)
+                # Ajouter le batch encodé à la liste des batches encodés
                 encoded_batches.append(encoded_batch)
+            # Concaténer tous les batches encodés en un seul tableau numpy
             return np.concatenate(encoded_batches)
-
-        print("\nCalcul des embeddings par lots de 5000...")
-        start_time = datetime.now()
-
-        for file in Path(root1).glob(f'df_all_{RameauVectors}*.pkl'):
-            os.remove(file)
-
-        bt_size = 5000
-        nb_tours = len(training_data) // bt_size
-
-        for i in range(0, nb_tours + 1):
-            df4 = training_data.iloc[(i * bt_size):(i * bt_size) + bt_size].reset_index(drop=True)
-            if df4.empty:
-                continue
-            encoded_articles = encode_batches(df4, encoder, bt_size)
-            df4['content_vector'] = pd.Series(encoded_articles.tolist())
-            df4 = df4.drop(columns=['DESCR'])
-
-            with open(f"{root}df_all_{RameauVectors}_{i+1}.pkl", 'wb') as f:
-                pickle.dump(df4, f)
-
-        print(f"Temps d'exécution total de l'embedding : {(datetime.now() - start_time).total_seconds() * 1000:.2f} ms")
-
-    if action == "init":
-        print(f"\nMode init : fusion des fichiers vectorisés")
-        list_of_files = list(Path(root1).glob(f'df_all_{RameauVectors}*.pkl'))
-        result_dfs = [pd.read_pickle(file) for file in list_of_files]
-        if result_dfs:
-            result = pd.concat(result_dfs, ignore_index=True)
-            size_csv_update = len(result)
-            size_origine_new = len(result)
-            with open(f"{root}{RameauVectors}.pkl", 'wb') as f:
-                pickle.dump(result, f)
-
-    elif action == "update":
-        print("\nMode update...")
-        global_pkl = f"{root}{RameauVectors}.pkl"
-        if not os.path.exists(global_pkl):
-            print(f"Le fichier global {global_pkl} n'existe pas, mise à jour impossible.")
-            return
-
-        df4 = pd.read_pickle(global_pkl)
-        size_origine = len(df4)
-
-        list_of_files = list(Path(root1).glob(f'df_all_{RameauVectors}*.pkl'))
-        update_dfs = [pd.read_pickle(file) for file in list_of_files]
-        if update_dfs:
-            result = pd.concat(update_dfs, ignore_index=True)
-            df4 = df4[~df4['PPN'].isin(result['PPN'])]
-            df4 = pd.concat([df4, result], ignore_index=True)
-            size_origine_new = len(df4)
-
-            with open(global_pkl, 'wb') as f:
-                pickle.dump(df4, f)
-
+        
+        
+        
+        
+        
+        # In[10]:
+        print("")
+        print("")
+        print("")
+        print("")
+        
+        print("calcul embedding...calcul par lots de 5000")
+        start_time = datetime.now() 
+        #nettoyage
+        list_of_files = Path(root1).glob('df_all_'+RameauVectors+'*.pkl')
         for file in list_of_files:
             os.remove(file)
+        
+        bt_size=5000 # meilleur rendement
+        nb_tours=len(training_data)//bt_size
+        
+        print("nb tours:",nb_tours)
+        df4 = training_data.iloc[0:bt_size].reset_index()
+        #premier lot
+        encoded_articles = encode_batches(df4, encoder, bt_size)
+        df4['content_vector'] = pd.Series(encoded_articles.tolist())
+        df4 = df4.drop(columns=['DESCR'])
+        pos_file=1
+        with open(root+'df_all_'+RameauVectors+'_'+str(pos_file)+'.pkl','wb') as f:
+         pickle.dump(df4,f)
+        
+        
+        end_time = datetime.now() 
+        time_difference = (end_time - start_time).total_seconds() * 10**3
+        print("Temps d execution de l embedding pour le premier lot de 5000: ", time_difference, "ms") 
+        
+        # lots suivants
+        for i in range(1,nb_tours+1):
+            print((i*bt_size)+1,(i*bt_size)+bt_size)
+            df4 = training_data.iloc[(i*bt_size)+1:(i*bt_size)+bt_size].reset_index()
+            #on relance l encoder car au bout d un moment il ralenti
+            if i==50 or i==100  or i==150 :
+                #encoder = SentenceTransformer(emb_model, device='cuda')
+                encoder = SentenceTransformer(emb_model)
+            encoded_articles = encode_batches(df4, encoder, bt_size)
+            # Ajouter les vecteurs encodés en tant que nouvelle colonne 'content_vector' dans le DataFrame
+            df4['content_vector'] = pd.Series(encoded_articles.tolist())
+            
+            df4 = df4.drop(columns=['DESCR'])
+            pos_file=pos_file+1
+            #sauvegarde des 5000 vectorise
+            with open(root+'df_all_'+RameauVectors+'_'+str(pos_file)+'.pkl','wb') as f:
+                pickle.dump(df4,f)
+                    
+            end_time = datetime.now() 
+            time_difference = (end_time - start_time).total_seconds() * 10**3
+            print("                             cumul Temps d execution de l embedding apres le lot suivant: ", time_difference, "ms") 
+        
+        end_time = datetime.now() 
+        time_difference = (end_time - start_time).total_seconds() * 10**3
+        print("Temps d execution total de l embedding : ", time_difference, "ms") 
+        
+        #os.remove(df_file_path)
+        
+        
+        # In[11]:
+    
+    #si on est en init (on recharge tout)
+    if action =="init"   :
+        print("")
+        print("")
+        print("")
+        print("")
+        print("en mode init : fusion et sauvegarde des fichiers vectorisés en : "+RameauVectors+".pkl")
+        
+        list_of_files = Path(root1).glob('df_all_'+RameauVectors+'*.pkl')
+        pos=0
+        #concatene en u seul fichier
+        for file in list_of_files:
+                    #print(file)
+                    df4 = pd.read_pickle(file)
+                    if pos==0:
+                        result = df4
+                    else:
+                        result = pd.concat([result, df4], ignore_index=True)
+                    pos=pos+1
+        size_csv_update=len(result)
+        
+        size_origine_new=len(result)
+        if size_csv_update*2 < size_csv:
+            print("en mode init : le resultat des embedding est incoherent avec la taille du fichier d origine :"+str(size_csv)+" et le fichier de embeddings : "+str(size_csv_update)+" on quit")
+            quit()
+        with open(root+RameauVectors+'.pkl','wb') as f:
+                pickle.dump(result,f) 
+    
+    
+    # In[12]:
+    
+    
+    #del result
+    # si on est en update
+    if action =="update"  :
+        print("")
+        print("")
+        print("")
+        print("")
+        print("en mode update" )
+        if os.path.exists(root+RameauVectors+'.pkl')==False:
+            print("le fichier global: "+RameauVectors+".pkl n existe pas, il a ete detruit ou un init n'as pas ete fait au part avant,  on  quit")
+            quit()
+        #recup tous les vecteur par ppn
+        print("")
+        print("en mode update : chargement du fichier global init vectorisé : "+root+RameauVectors+".pkl")
+        df4 = pd.read_pickle(root+RameauVectors+'.pkl')
+        #df4 = pickle.load(root+RameauVectors+'.pkl')
+        #with open(root+RameauVectors+'.pkl', 'rb') as pickle_file:
+        #    df4 = pickle.load(pickle_file)
+        
+        size_origine=len(df4) 
+        
+        if size_origine <10:
+            print("les vecteurs sauvegardes dans le fichier origine :"+RameauVectors+".pkl sont inferieur a 10 il y a probablement un pb on  quit")
+            quit()
+        #recup des fichiers vectors d update
+        list_of_files = Path(root1).glob('df_all_'+RameauVectors+'*.pkl')
+        pos=0
+        print("")
+        print("en mode update : chargement des fichiers de mise a jours vectorises : "+'df_all_'+RameauVectors+'*.pkl')
+        #concat des nouveau vecteurs
+        for file in list_of_files:
+                    print("               chargement fichier de mise a jour :")
+                    print(file)
+                    df = pd.read_pickle(file)
+                    if pos==0:
+                        result = df
+                    else:
+                        result = pd.concat([result, df], ignore_index=True)
+                    pos=pos+1
+        #suppression ajout 
+        print("en mode update : suppression des ppn du fichier origine se trouvant dans le fichier d update")
+        df4 = df4[~df4['PPN'].isin(result['PPN'])]
+        #ajout
+        print("en mode update : ajout des ppn du fichier d update dans le fichier origine nettoye")
+        df4=pd.concat([df4, result], ignore_index=True)
+        size_origine_new=len(df4)
+        
+        if size_origine_new*2 < size_origine:
+            print("le nombre total de vecteurs fusionnés "+str(size_origine_new)+" est tres inferieur au fichier origine :"+str(size_origine)+" , il y a probablement un pb on  quit pour eviter de veroler le fichier origine :"+RameauVectors+".pkl")
+            quit()
+        #sauvegarde tous les nouveau vecteurs
+        print("mise a jour du fichier global init :"+RameauVectors+".pkl")
+        #df4.to_pickle(root+RameauVectors+'.pkl')
+        with open(root+RameauVectors+'.pkl','wb') as f:
+                pickle.dump(df4,f)    
+        
+        
+        #nettoyage
+        list_of_files = Path(root1).glob('df_all_'+RameauVectors+'*.pkl')
+        for file in list_of_files:
+            os.remove(file)
+        #tronconne
+        print("")
+        print("en mode update : generation des fichiers de vecteurs : df_all_ ,par lot de 5000")
+        bt_size=5000 # meilleur rendement
+        nb_tours=len(df4)//bt_size
+    
+        for i in range(0,nb_tours+1):
+            #print((i*bt_size)+1,(i*bt_size)+bt_size)
+            resu = df4.iloc[(i*bt_size)+1:(i*bt_size)+bt_size].reset_index(drop=True)
+            with open(root+'df_all_'+RameauVectors+'_'+str(i)+'.pkl','wb') as f:
+                pickle.dump(resu,f)
+    
+    
+    # In[13]:
+    if action =="init" or action =="update"  :
+        print("")
+        print("")
+        print("")
+        print("")
+        print("fusion des fichiers de travail df_all_ en lots plus grands (de 1 fichier si possible, cela depend de la variable nb_lots_de_moyenne) et sauvegarde dans les fichiers de travail: df_resu_")
+        
+        
+        list_of_files = Path(root1).glob('df_resu_'+RameauVectors+'*.pkl')
+        for file in list_of_files:
+            os.remove(file)
+        
+        list_of_files = Path(root1).glob('df_all_'+RameauVectors+'*.pkl')
+        pos=0
+        
+        for file in list_of_files:
+                    #print(file)
+                    df4 = pd.read_pickle(file)
+                    if pos==0:
+                        result = df4
+                    else:
+                        result = pd.concat([result, df4], ignore_index=True)
+                    if (pos  % nb_lots_de_moyenne == 0) and pos>0 :
+                        #print('df_resu'+str(pos)+'.pkl')
+                        with open(root+'df_resu_'+RameauVectors+'_'+str(pos)+'.pkl','wb') as f:
+                            pickle.dump(result,f)
+                        result = result.head(0)
+        
+                    pos=pos+1
+        with open(root+'df_resu_'+RameauVectors+'_'+str(pos)+'.pkl','wb') as f:
+                pickle.dump(result,f)            
+        print("")
+        print('echantillon:')
+        result.info()
+         
+        
+        
+        # In[14]:
+        
+        del result
+        #regroupement pour chaque fichier
+        print("")
+        print("")
+        print("")
+        print("")
+        print("Pour chaque fichiers de travail df_resu_ : explosion par labels, puis regroupement par moyennes des vecteurs puis ecriture des resultats dans des  fichiers de travail : df_group_")
+       
+        list_of_files = Path(root1).glob('df_all_'+RameauVectors+'*.pkl')
+        for file in list_of_files:
+            os.remove(file)
+        
+        list_of_files = Path(root1).glob('df_group_'+RameauVectors+'*.pkl')
+        for file in list_of_files:
+            os.remove(file)
+        pattern = r','    
+        list_of_files = Path(root1).glob('df_resu_'+RameauVectors+'*.pkl')
+        pos=0
+        
+        for file in list_of_files:
+            print("")
+            print("                       Fichier traité:")
+            print(file)
+            result = pd.read_pickle(file)
+            result.dropna(subset = ['content_vector'], inplace=True)
+            #df4 = df4.rename(columns={'RAMEAU_chains2': 'RAMEAU_list'})
+            result = result.rename(columns={'RAMEAU': 'RAMEAU_list'})
+            result['RAMEAU_list'] = result['RAMEAU_list'].apply(lambda x: re.split(pattern, x))  
+            result = result.explode('RAMEAU_list')
+            
+            
+            label_vectors = result.groupby('RAMEAU_list').agg(mean=('content_vector', lambda x: np.vstack(x).mean(axis=0).tolist()))
+            label_vectors['target'] = label_vectors.index
+            label_vectors.columns = ['content_vector', 'label']
+            with open(root+'df_group_'+RameauVectors+'_'+str(pos)+'.pkl','wb') as f:
+                pickle.dump(label_vectors,f)
+            pos=pos+1
+            #del label_vectors
+        
+        
+        
+        # In[15]:
+        
+        
+        #concatenation des fichiers regroupes si on a plusieurs fichiers de travail
+        if pos>1:
+            print("")
+            print("")
+            print("")
+            print("")
+            print("si il y a plusieurs fichiers de travail df_group_ alors on les regroupe dans un dataframe label_vectors:")
+           
+            #if update==False:
+            list_of_files = Path(root1).glob('df_group_'+RameauVectors+'*.pkl')
+            #else:
+            #    list_of_files = Path(root1).glob('df_group_'+RameauVectors+'*.pkl') # pour prendre aussi les fichiers du chargement initial
+            pos=0
+            
+            for file in list_of_files:
+                print(file)
+                if pos==0:
+                    label_vectors=pd.read_pickle(file)
+                else:
+                    label_vectors = pd.concat([label_vectors,pd.read_pickle(file)], ignore_index=True)
+                pos=pos+1
+            label_vectors.info()
+        
+        
+        
+        #moyenne sur les fichiers regroupes si plusieurs fichiers de groupement
+        if pos>1:
+            print("")
+            print("")
+            print("")
+            print("")
+            print("si il y a eu plusieurs fichiers de travail df_group_ alors on re-calcul les moyennes des vecteurs du dataframe label_vectors:")
+           
+            label_vectors = label_vectors.groupby('label').agg(mean=('content_vector', lambda x: np.vstack(x).mean(axis=0).tolist()))
+            label_vectors['target'] = label_vectors.index
+            label_vectors.columns = ['content_vector', 'label']
+            #del result
+            label_vectors.info()
+        
+        
+        # In[19]:
+        
+        print("")
+        print("")
+        print("")
+        print("")
+        print("a partir du dataframe label_vectors, generations des fichiers pour qdrant: df_emb_ , par lots de 10000 :")
+       
+        list_of_files = Path(root1).glob('df_emb_'+RameauVectors+'*.pkl')
+        for file in list_of_files:
+            os.remove(file)
+        
+        pattern = r';\s*(?![^()]*\))|--'
+        #pattern = r';'
+        chunks = [label_vectors.iloc[i:i+10000] for i in range(0, len(label_vectors), 10000)]
+        pos=0
+        for chunk in chunks:
+            print("")
+            print("                        LOT info:")
+            chunk.info()
+            pos=pos+1
+            label_vectors_trv=chunk.copy()
+            
+            label_vectors_trv.to_pickle(root+'df_emb_'+RameauVectors+'_'+str(pos)+'.pkl')
+    
+        list_of_files = Path(root1).glob('df_emb_'+RameauVectors+'*.pkl')
+        pos=0
+        for file in list_of_files:
+            #print(file)
+            df4 = pd.read_pickle(file)
+            if pos==0:
+                result = df4
+            else:
+                result = pd.concat([result, df4], ignore_index=True)
+            pos=pos+1
+        print("")
+        print("")
+        print("Fichier vecteur resultat pour qdrant :")
+        result.info()
+        if len(result.index)*20 <size_origine_new:
+                print("le nombre de  vecteurs :"+str(len(result.index))+ "*10 est inferieur au vecteurs origine:  "+ str(size_origine_new)+" ce qui est trop peut pour rameau (environ 40000) il y a probablement un pb on  quit le chargement dans qdrant pour ne pas detruire la version existante")
+                quit() 
+        #creation fichier de sauvegarde
+        print("Sauvegarde du Fichier vecteur resultat pour qdrant dans :archive_"+RameauVectors+'.pkl')
+        result.to_pickle(root+'archive_'+RameauVectors+'.pkl')
 
-    if action in ["init", "update"]:
-        print("\nRegroupement et calcul des moyennes vectorielles par concept...")
-        global_df = pd.read_pickle(f"{root}{RameauVectors}.pkl")
-        global_df.dropna(subset=['content_vector'], inplace=True)
-        global_df = global_df.rename(columns={'RAMEAU': 'RAMEAU_list'})
-        global_df['RAMEAU_list'] = global_df['RAMEAU_list'].apply(lambda x: re.split(r',', str(x)))
-        exploded = global_df.explode('RAMEAU_list')
-
-        label_vectors = exploded.groupby('RAMEAU_list').agg(
-            mean=('content_vector', lambda x: np.vstack(x).mean(axis=0).tolist())
-        ).reset_index()
-
-        label_vectors.columns = ['label', 'content_vector']
-        result_qdrant = label_vectors[['content_vector', 'label']]
-
-        print(f"Sauvegarde de l'archive Qdrant : archive_{RameauVectors}.pkl")
-        result_qdrant.to_pickle(f"{root}archive_{RameauVectors}.pkl")
-
-    if action in ["init", "update", "restore"]:
-        archive_path = f"{root}archive_{RameauVectors}.pkl"
-        if not os.path.exists(archive_path):
-            print(f"L'archive vectorielle '{archive_path}' est introuvable.")
-            return
-
-        result = pd.read_pickle(archive_path)
-        collection_name = f"{conceptsORchains}_{alias_model}_{avec_these}"
-
+    # si une des actions
+    if action =="init" or action =="update" or action =="restore" :
+        print("")
+        print("")
+        print("")
+        print("")
+        print("pour qdrant recuperation du dernier fichier archive généré:")
+        print("archive_"+RameauVectors+'.pkl')
+        if os.path.exists(root+'archive_'+RameauVectors+'.pkl')==False:
+            print("le fichier des vecteurs : 'archive_'+"+RameauVectors+".pkl n existe pas on  quit")
+            quit()
+        print(root+'archive_'+RameauVectors+'.pkl')
+        result = pd.read_pickle(root+'archive_'+RameauVectors+'.pkl')
+        
+        
+        
+        if len(result.index) <1000:
+                print("le nombre de  vecteurs est inferieur a 1000 ce qui est trop peut pour rameau (environ 40000) il y a probablement un pb on  quit le chargement dans qdrant pour ne pas detruire la version existante")
+                quit() 
+        
+        # ## Initialisation d'une instance Qdrant et création d'une collection pour stocker les données
         client = QdrantClient(host=adress_qdrant, port=port_qdrant)
-
-        print(f"\nSuppression / Reconstitution de la collection Qdrant '{collection_name}'...")
-        try:
-            client.delete_collection(collection_name=collection_name)
-        except Exception:
-            pass
-
-        if not client.collection_exists(collection_name):
-            client.create_collection(
-                collection_name=collection_name,
-                vectors_config=VectorParams(
-                    size=encoder.get_sentence_embedding_dimension(),
-                    distance=Distance.COSINE,
-                    on_disk=True
-                ),
-                quantization_config=models.ScalarQuantization(
-                    scalar=models.ScalarQuantizationConfig(
-                        type=models.ScalarType.INT8,
-                        always_ram=True,
-                    ),
-                ),
-            )
-
-        print("Chargement des vecteurs dans Qdrant...")
+        # In[ ]:
+        
+        print("")
+        print("")
+        print("")
+        print("")
+        print("qdrant delete collection..")
+        print(conceptsORchains+'_'+alias_model+'_'+avec_these)
+        client = QdrantClient(host=adress_qdrant, port=port_qdrant)
+        client.delete_collection(collection_name=conceptsORchains+'_'+alias_model+'_'+avec_these)
+        
+        
+        
+        # In[ ]:
+        
+        print("")
+        print("")
+        print("")
+        print("")
+        print("qdrant create collection..")
+        print(conceptsORchains+'_'+alias_model+'_'+avec_these)
+        
+        client = QdrantClient(host=adress_qdrant, port=port_qdrant)
+        from qdrant_client.models import VectorParams, Distance
+        if not client.collection_exists(conceptsORchains+'_'+alias_model+'_'+avec_these):
+           client.create_collection(
+              collection_name=conceptsORchains+'_'+alias_model+'_'+avec_these,
+              vectors_config=VectorParams(size=encoder.get_sentence_embedding_dimension(), distance=Distance.COSINE,on_disk=True),
+               quantization_config=models.ScalarQuantization(
+                scalar=models.ScalarQuantizationConfig(
+                    type=models.ScalarType.INT8,
+                    always_ram=True,
+                ),                             
+            ),
+            
+               
+              
+           )
+        
+        
+        # In[ ]:
+        
+        
+        print("")
+        print("qdrant chargement du dataframe result")
         client.upload_records(
-            collection_name=collection_name,
-            records=[
-                models.Record(
-                    id=idx,
-                    vector=list(doc[0]),
-                    payload={"label": doc[1]}
-                ) for idx, doc in enumerate(result.values)
-            ]
-        )
-
-        print("\nTest de recherche sur Qdrant (requête : 'la radio') :")
+                collection_name=conceptsORchains+'_'+alias_model+'_'+avec_these,
+                records=[
+                    models.Record(
+                        id=idx,
+                        #vector=encoder.encode(doc[1]).tolist(),
+                        #vector=dict.fromkeys( "bbb", doc[7]).values(),
+                        vector=list(doc[0]),
+                        payload=dict.fromkeys( "aaa",doc[1])
+                    ) for idx, doc in enumerate(result.values)
+                ]
+            )
+    
+        
+        
+        # In[ ]:
+        if action =="init" or action =="update":
+            print("")
+            print("")
+            print("")
+            print("")
+            print("nettoie fichiers de travail..")
+            if nettoie_file_trv==True:
+                os.remove(root+bibprepared_filename+'.pkl')
+                list_of_files = Path(root1).glob('df_all_'+RameauVectors+'*.pkl')
+                for file in list_of_files:
+                    os.remove(file)
+                list_of_files = Path(root1).glob('df_resu_'+RameauVectors+'*.pkl')
+                for file in list_of_files:
+                    os.remove(file)
+                list_of_files = Path(root1).glob('df_group_'+RameauVectors+'*.pkl')
+                for file in list_of_files:
+                    os.remove(file)
+                list_of_files = Path(root1).glob('df_emb_'+RameauVectors+'*.pkl')
+                for file in list_of_files:
+                    os.remove(file)
+                
+            if update==True:
+                config_update['DEFAULT']['date_mod']=date_update_file
+                with open(root+bibprepared_filename+'_update.ini', 'w') as configfile:
+                    config_update.write(configfile)
+            if update==False:
+                config_init['DEFAULT']['date_mod']=date_init_file
+                with open(root+bibprepared_filename+'_init.ini', 'w') as configfile:
+                    config_init.write(configfile)
+                
+        
+        
+        # ## Prédiction des labels
+        
+        # In[ ]:
+        print("")
+        print("")
+        print("")
+        print("")
+        print("test requete sur : la radio")
+        client = QdrantClient(host=adress_qdrant, port=port_qdrant)
         hits = client.search(
-            collection_name=collection_name,
-            query_vector=encoder.encode("la radio").tolist(),
-            limit=5
-        )
+                collection_name=conceptsORchains+'_'+alias_model+'_'+avec_these,
+                query_vector=encoder.encode("la radio").tolist(),
+                limit=6
+            )
+        load_items = []
+        
         for hit in hits:
-            print(f" - Score: {hit.score:.4f} | Label: {hit.payload.get('label')}")
+                load_items.append({'score': hit.score, 'label': hit.payload})
+        
+        print(load_items)
+
+
+# In[ ]:
 
 
 def main():
-    parser = optparse.OptionParser()
-    parser.add_option('--action', '-a', default="update")
-    parser.add_option('--conceptsORchains', '-c', default="concepts")
-    parser.add_option('--alias_model', '-m', default="allMin")
-    parser.add_option('--avec_these', '-t', default="only_mono")
-    options, _ = parser.parse_args()
+    print ('MAIN')
+    try:
+        p = optparse.OptionParser()
+        p.add_option('--action', '-a', default="update")
+        p.add_option('--conceptsORchains', '-c', default="concepts")
+        p.add_option('--alias_model', '-m', default="allMin")
+        p.add_option('--avec_these', '-t', default="only_mono")
+        options, arguments = p.parse_args()
+        ok =True
+        if options.action not in ['init','update','auto','restore']:
+            print ('action doit avoir :init, update ou auto')
+            ok =False
+            quit()
+        if options.conceptsORchains not in ['concepts','chains']:
+            print ('conceptsORchains doit avoir :concepts ou chains')
+            ok =False
+            quit() 
+        if options.alias_model not in ['allMin','distiluse','e5-large']:
+            print ('alias_model doit avoir :allMin, distiluse ou e5-large')
+            ok =False
+            quit()
+        if options.avec_these not in ['only_mono','only_theses','with_theses']:
+            print ('avec_these doit avoir :only_mono, only_theses ou with_theses')
+            ok =False
+            quit()
 
-    if options.action not in ['init', 'update', 'auto', 'restore']:
-        print('action doit être : init, update, auto ou restore')
-        sys.exit(1)
-
-    launch(options.action, options.conceptsORchains, options.alias_model, options.avec_these)
-
+        if ok==True:
+            sys.stdout = open('log_'+options.action + '_'+options.conceptsORchains + '_'+options.alias_model + '_'+options.avec_these +'.txt','w')
+            launch(options.action, options.conceptsORchains, options.alias_model,options.avec_these)
+    except BaseException as e:
+        print('Failed to do something: ' + str(e))
+        raise
 
 if __name__ == '__main__':
-    main()
+  main()
+
