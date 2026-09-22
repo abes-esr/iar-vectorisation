@@ -80,7 +80,7 @@ Le composant de vectorisation orchestre le traitement par lots volumineux de not
 ### 1. `POST /init` ou `GET /init`
 
 Déclenche l'initialisation complète du corpus vectoriel RAMEAU.  
-Pour des raisons de sécurité, les paramètres (`conceptsORchains`, `alias_model`, `avec_these`, noms des CSV) sont directement configurés dans [.env](file:///c:/Projets/iar/iar-vectorisation/.env) et non transmis via l'URL.
+Pour des raisons de sécurité, les paramètres (`conceptsORchains`, `avec_these`, noms des CSV) sont directement configurés dans [.env](file:///c:/Projets/iar/iar-vectorisation/.env). Le webservice lance automatiquement 3 conteneurs batch en parallèle, un pour chaque modèle supporté (`allMin`, `distiluse`, `e5-large`).
 
 ```bash
 curl -X POST "http://localhost:8100/init"

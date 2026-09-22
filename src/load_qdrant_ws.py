@@ -18,30 +18,21 @@ async def root():
 
 def run_vectorization_pipeline(action: str) -> dict:
     """
-    Lance le pipeline de vectorisation (init ou update) dans un conteneur Docker batch
-    via le socket Docker de l'hôte (DooD - Docker-out-of-Docker).
-    Les paramètres (modèle, typologie, concepts/chaînes, CSV) sont extraits directement
+    Lance le pipeline de vectorisation (init ou update) dans des conteneurs Docker batch distincts
+    via le socket Docker de l'hôte (DooD - Docker-out-of-Docker), un conteneur par modèle configuré
+    (allMin, distiluse, e5-large).
+    Les paramètres (typologie, concepts/chaînes, CSV) sont extraits directement
     de la configuration applicative afin de prévenir toute injection de commande.
 
     :param action: Action à exécuter ('init' ou 'update').
-    :return: Dictionnaire contenant le statut et les détails d'exécution.
+    :return: Dictionnaire contenant le statut et les détails d'exécution de chaque conteneur.
     """
     concepts_or_chains = config.VECTORIZE_CONCEPTS_OR_CHAINS
-    alias_model = config.VECTORIZE_ALIAS_MODEL
     avec_these = config.VECTORIZE_AVEC_THESE
     csv_filename = config.CSV_INIT_FILENAME if action == "init" else config.CSV_UPDATE_FILENAME
+    models_to_run = getattr(config, "MODELS", ["allMin", "distiluse", "e5-large"])
 
-    # Construction de la liste d'arguments pour l'exécution du script de vectorisation
-    command_args = [
-        "python", "rameau_vectorize.py",
-        "--action", action,
-        "--conceptsORchains", concepts_or_chains,
-        "--alias_model", alias_model,
-        "--avec_these", avec_these,
-        "--csv_filename", csv_filename
-    ]
-
-    print(f"Lancement de la vectorisation conteneurisée (action={action}) avec les options: {command_args}")
+    print(f"Lancement de la vectorisation conteneurisée (action={action}) pour les modèles: {models_to_run}")
 
     try:
         client = docker.DockerClient(base_url=config.DOCKER_SOCK)
@@ -80,49 +71,64 @@ def run_vectorization_pipeline(action: str) -> dict:
             "CSV_INIT_FILENAME": config.CSV_INIT_FILENAME,
             "CSV_UPDATE_FILENAME": config.CSV_UPDATE_FILENAME,
             "VECTORIZE_CONCEPTS_OR_CHAINS": config.VECTORIZE_CONCEPTS_OR_CHAINS,
-            "VECTORIZE_ALIAS_MODEL": config.VECTORIZE_ALIAS_MODEL,
             "VECTORIZE_AVEC_THESE": config.VECTORIZE_AVEC_THESE,
         }
 
-        run_kwargs = {
-            "network": config.DOCKER_NETWORK,
-            "environment": batch_env,
-            "command": command_args,
-            "volumes": {
-                volume_bind: {
-                    "bind": "/app/data",
-                    "mode": "rw",
-                }
-            },
-            "detach": True
-        }
-        if device_requests:
-            run_kwargs["device_requests"] = device_requests
+        launched_containers = []
+        for model in models_to_run:
+            command_args = [
+                "python", "rameau_vectorize.py",
+                "--action", action,
+                "--conceptsORchains", concepts_or_chains,
+                "--alias_model", model,
+                "--avec_these", avec_these,
+                "--csv_filename", csv_filename
+            ]
 
-        try:
-            container = client.containers.run(config.DOCKER_IMAGE_BATCH, **run_kwargs)
-        except Exception as launch_err:
-            # En cas d'échec lié au runtime GPU (ex: WSL sans adaptateur GPU NVIDIA), repli automatique en mode CPU
-            err_str = str(launch_err).lower()
-            if device_requests and any(k in err_str for k in ("gpu", "nvidia", "adapters were found", "device_requests")):
-                print(f"Échec d'allocation GPU ({launch_err}). Repli automatique sur l'exécution en mode CPU...")
-                run_kwargs.pop("device_requests", None)
+            run_kwargs = {
+                "network": config.DOCKER_NETWORK,
+                "environment": batch_env,
+                "command": command_args,
+                "volumes": {
+                    volume_bind: {
+                        "bind": "/app/data",
+                        "mode": "rw",
+                    }
+                },
+                "detach": True
+            }
+            if device_requests:
+                run_kwargs["device_requests"] = device_requests
+
+            try:
                 container = client.containers.run(config.DOCKER_IMAGE_BATCH, **run_kwargs)
-            else:
-                raise launch_err
+            except Exception as launch_err:
+                # En cas d'échec lié au runtime GPU (ex: WSL sans adaptateur GPU NVIDIA), repli automatique en mode CPU
+                err_str = str(launch_err).lower()
+                if device_requests and any(k in err_str for k in ("gpu", "nvidia", "adapters were found", "device_requests")):
+                    print(f"Échec d'allocation GPU pour {model} ({launch_err}). Repli automatique sur l'exécution en mode CPU...")
+                    run_kwargs.pop("device_requests", None)
+                    container = client.containers.run(config.DOCKER_IMAGE_BATCH, **run_kwargs)
+                else:
+                    raise launch_err
+
+            print(f"Conteneur batch lancé pour le modèle '{model}' : ID={container.short_id}")
+            launched_containers.append({
+                "model": model,
+                "container_id": container.short_id,
+                "command": command_args
+            })
 
         return {
             "status": "success",
-            "message": f"Conteneur batch lancé avec succès ({action})",
-            "container_id": container.short_id,
-            "command": command_args
+            "message": f"{len(launched_containers)} conteneurs batch lancés avec succès ({action})",
+            "containers": launched_containers
         }
     except Exception as e:
         print(f"Erreur lors du lancement Docker: {e}")
         return {
             "status": "error",
-            "message": f"Impossible de contacter le démon Docker: {str(e)}",
-            "command": command_args
+            "message": f"Impossible de contacter le démon Docker: {str(e)}"
         }
 
 

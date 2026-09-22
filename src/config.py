@@ -22,11 +22,11 @@ PKL_DIR = os.getenv("IAR_PKL_DIR", os.path.join(APP_DATA_DIR, "pkl"))
 
 # Paramètres par défaut pour les pipelines de vectorisation (/init et /update)
 VECTORIZE_CONCEPTS_OR_CHAINS = os.getenv("IAR_VECTORIZE_CONCEPTS_OR_CHAINS", "concepts")
-VECTORIZE_ALIAS_MODEL = os.getenv("IAR_VECTORIZE_ALIAS_MODEL", "allMin")
 VECTORIZE_AVEC_THESE = os.getenv("IAR_VECTORIZE_AVEC_THESE", "only_mono")
+MODELS = ["allMin", "distiluse", "e5-large"]
 
 # Accélération GPU pour les conteneurs batch (désactivée par défaut pour compatibilité locale)
 ENABLE_GPU = os.getenv("ENABLE_GPU", "false").lower() in ("true", "1", "yes")
 
-API_HOST = os.getenv("API_HOST", "0.0.0.0")
-API_PORT = int(os.getenv("API_PORT", "6381"))
+API_HOST = os.getenv("IAR_VECTORISATION_HOST", "0.0.0.0")
+API_PORT = int(os.getenv("IAR_VECTORISATION_PORT", "6381"))
