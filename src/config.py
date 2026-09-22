@@ -13,6 +13,7 @@ DOCKER_VOLUME_BIND = os.getenv("IAR_DOCKER_VOLUME_BIND", "./volumes")
 DOCKER_NETWORK = os.getenv("IAR_DOCKER_NETWORK", "mon_reseau")
 DOCKER_IMAGE_BATCH = os.getenv("IAR_DOCKER_IMAGE_BATCH", "rameau_vectorize_batch:latest")
 DOCKER_SOCK = os.getenv("IAR_DOCKER_SOCK", "unix:///var/run/docker.sock")
+DOCKER_BATCH_USER = os.getenv("IAR_DOCKER_BATCH_USER", "root")
 
 # Configuration des fichiers CSV d'ingestion RAMEAU
 CSV_INIT_FILENAME = os.getenv("IAR_CSV_INIT_FILENAME", "export_rameau.csv")

@@ -97,6 +97,10 @@ def run_vectorization_pipeline(action: str) -> dict:
                 },
                 "detach": True
             }
+            batch_user = getattr(config, "DOCKER_BATCH_USER", "root")
+            if batch_user:
+                run_kwargs["user"] = batch_user
+
             if device_requests:
                 run_kwargs["device_requests"] = device_requests
 
