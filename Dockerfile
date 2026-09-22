@@ -21,8 +21,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Création d'un utilisateur non-root pour la sécurité
-RUN useradd -u 1000 -m -s /bin/bash appuser && \
+# Création du groupe docker et d'un utilisateur non-root pour la sécurité
+RUN (groupadd -g 999 docker 2>/dev/null || groupadd docker) && \
+    useradd -u 1000 -m -s /bin/bash appuser && \
+    usermod -aG docker appuser && \
     mkdir -p /app/data /app/volumes && \
     chown -R appuser:appuser /app
 

@@ -1,7 +1,4 @@
-from fastapi import FastAPI, UploadFile, File
-from fastapi.responses import FileResponse
-import os
-from pathlib import Path
+from fastapi import FastAPI
 import docker
 try:
     import config
@@ -12,82 +9,102 @@ app = FastAPI()
 
 @app.get("/")
 async def root():
+    """
+    Sonde basique de disponibilité (Healthcheck).
+    """
     return {"hello": "world"}
-    
-@app.get("/log")
-async def download_file(action: str, conceptsORchains: str, alias_model: str, avec_these: str):
-    file_path = 'log_'+action + '_'+conceptsORchains + '_'+alias_model + '_'+avec_these +'.txt'
-    safe_path = os.path.join(config.APP_DATA_DIR, os.path.basename(file_path))
-    if not os.path.exists(safe_path):
-        if os.path.exists(file_path)==False:
-            print("le fichier : "+file_path+"  n existe pas pour ces parametres")
-            return "le fichier : "+file_path+"  n existe pas pour ces parametres"
-    else:
-        file_path = safe_path
-    return FileResponse(file_path)
 
-def is_docker():
-    cwd = str(Path.cwd())
-    print(cwd)
-    if "/app" in cwd :
-        return True
-    else:
-        return False
+def run_vectorization_pipeline(action: str) -> dict:
+    """
+    Lance le pipeline de vectorisation (init ou update) dans un conteneur Docker batch
+    via le socket Docker de l'hôte (DooD - Docker-out-of-Docker).
+    Les paramètres (modèle, typologie, concepts/chaînes, CSV) sont extraits directement
+    de la configuration applicative afin de prévenir toute injection de commande.
 
-@app.get("/lanceVectorisation/")
-async def lanceVectorisation(action: str, conceptsORchains: str, alias_model: str, avec_these: str):
-    message="ok"
-    if action not in ['init','update','auto','restore']:
-        message='action doit avoir :init, update ou auto ou restore'
-        
-    if conceptsORchains not in ['concepts','chains']:
-        message='conceptsORchains doit avoir :concepts ou chains'
-         
-    if alias_model not in ['allMin','distiluse','e5-large']:
-        message='alias_model doit avoir :allMin, distiluse ou e5-large'
-        
-    if avec_these not in ['only_mono','only_theses','with_theses']:
-        message='avec_these doit avoir :only_mono, only_theses ou with_theses'
-        
-    print(message)
-    if message!='ok':
-        print(message)
-        return {message : ""}
-    print("lance La commande:")
-    
-    if is_docker():
-        print("1 Le programme est exécuté dans un conteneur Docker.")
-        commande=['--action', action,'--conceptsORchains', conceptsORchains,'--alias_model', alias_model,'--avec_these', avec_these]
+    :param action: Action à exécuter ('init' ou 'update').
+    :return: Dictionnaire contenant le statut et les détails d'exécution.
+    """
+    concepts_or_chains = config.VECTORIZE_CONCEPTS_OR_CHAINS
+    alias_model = config.VECTORIZE_ALIAS_MODEL
+    avec_these = config.VECTORIZE_AVEC_THESE
+    csv_filename = config.CSV_INIT_FILENAME if action == "init" else config.CSV_UPDATE_FILENAME
 
+    # Construction de la liste d'arguments pour l'exécution du script de vectorisation
+    command_args = [
+        "python", "rameau_vectorize.py",
+        "--action", action,
+        "--conceptsORchains", concepts_or_chains,
+        "--alias_model", alias_model,
+        "--avec_these", avec_these,
+        "--csv_filename", csv_filename
+    ]
+
+    print(f"Lancement de la vectorisation conteneurisée (action={action}) avec les options: {command_args}")
+
+    try:
         client = docker.DockerClient(base_url=config.DOCKER_SOCK)
-        
-        container = client.containers.run(
-            config.DOCKER_IMAGE_BATCH,
-            network=config.DOCKER_NETWORK,
-            device_requests=[docker.types.DeviceRequest(device_ids=['0'], capabilities=[['gpu']])], 
-            command=commande,
-            volumes={
+        device_requests = [docker.types.DeviceRequest(device_ids=['0'], capabilities=[['gpu']])] if config.ENABLE_GPU else None
+
+        run_kwargs = {
+            "network": config.DOCKER_NETWORK,
+            "command": command_args,
+            "volumes": {
                 config.DOCKER_VOLUME_BIND: {
-                    "bind": "/app",
+                    "bind": "/app/data",
                     "mode": "rw",
                 }
             },
-            detach=True
-        )
-        return {"La commande docker a été lancée" : str(commande)}
-    else:
-        print("1 Le programme n'est pas exécuté dans un conteneur Docker.")
-        commande ='python rameau_vectorize.py --action '+action+' --conceptsORchains '+conceptsORchains+' --alias_model '+alias_model+' --avec_these '+avec_these 
-        print (commande)
-        return {"La commande a été lancée" : commande}
+            "detach": True
+        }
+        if device_requests:
+            run_kwargs["device_requests"] = device_requests
 
-@app.post("/uploadfile/")
-async def create_upload_file(file: UploadFile = File(...)):
-    contents = file.file.read()
-    os.makedirs(config.APP_DATA_DIR, exist_ok=True)
-    with open(os.path.join(config.APP_DATA_DIR, os.path.basename(file.filename).replace(' ','_')), 'wb') as f:
-        f.write(contents)
-    return {"ok pour filename": file.filename}
+        try:
+            container = client.containers.run(config.DOCKER_IMAGE_BATCH, **run_kwargs)
+        except Exception as launch_err:
+            # En cas d'échec lié au runtime GPU (ex: WSL sans adaptateur GPU NVIDIA), repli automatique en mode CPU
+            err_str = str(launch_err).lower()
+            if device_requests and any(k in err_str for k in ("gpu", "nvidia", "adapters were found", "device_requests")):
+                print(f"Échec d'allocation GPU ({launch_err}). Repli automatique sur l'exécution en mode CPU...")
+                run_kwargs.pop("device_requests", None)
+                container = client.containers.run(config.DOCKER_IMAGE_BATCH, **run_kwargs)
+            else:
+                raise launch_err
+
+        return {
+            "status": "success",
+            "message": f"Conteneur batch lancé avec succès ({action})",
+            "container_id": container.short_id,
+            "command": command_args
+        }
+    except Exception as e:
+        print(f"Erreur lors du lancement Docker: {e}")
+        return {
+            "status": "error",
+            "message": f"Impossible de contacter le démon Docker: {str(e)}",
+            "command": command_args
+        }
+
+
+@app.post("/init")
+@app.get("/init")
+async def init_vectorization():
+    """
+    Route dédiée pour lancer une initialisation complète du corpus vectoriel RAMEAU.
+    Les paramètres sont issus de la configuration (config.py / .env).
+    """
+    return run_vectorization_pipeline("init")
+
+
+@app.post("/update")
+@app.get("/update")
+async def update_vectorization():
+    """
+    Route dédiée pour lancer une mise à jour différentielle du corpus vectoriel RAMEAU.
+    Les paramètres sont issus de la configuration (config.py / .env).
+    """
+    return run_vectorization_pipeline("update")
+
 
 if __name__ == "__main__":
     import uvicorn

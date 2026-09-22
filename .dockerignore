@@ -15,6 +15,7 @@ volumes/
 *.csv
 *.tsv
 *.txt
+!requirements.txt
 *.ini
 !global_init.ini
 

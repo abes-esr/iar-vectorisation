@@ -56,8 +56,54 @@ except ImportError:
 
 # In[5]:
 
-def launch(action_in, conceptsORchains, alias_model,avec_these):
-    
+def resolve_csv_path(filename: str) -> str:
+    """
+    Localise un fichier CSV selon l'ordre de priorité suivant:
+    1. Dans le dossier CSV configuré (ex: data/csv via config.CSV_DIR)
+    2. Dans le dossier de données applicatif (ex: data via config.APP_DATA_DIR)
+    3. Dans /app/data/csv ou /app/data
+    4. À la racine du conteneur (/app/) ou du répertoire local
+    5. Le chemin direct fourni
+
+    :param filename: Nom du fichier ou chemin (avec ou sans extension .csv)
+    :return: Chemin résolu existant ou première cible par défaut
+    """
+    if not filename.endswith('.csv'):
+        filename_with_ext = f"{filename}.csv"
+    else:
+        filename_with_ext = filename
+
+    csv_dir = getattr(config, 'CSV_DIR', './data/csv')
+    app_data_dir = getattr(config, 'APP_DATA_DIR', './data')
+
+    candidate_paths = [
+        os.path.join(csv_dir, filename_with_ext),
+        os.path.join(app_data_dir, filename_with_ext),
+        os.path.join('/app/data/csv', filename_with_ext),
+        os.path.join('/app/data', filename_with_ext),
+        os.path.join('/app', filename_with_ext),
+        os.path.join('.', filename_with_ext),
+        filename_with_ext,
+    ]
+
+    for path in candidate_paths:
+        if os.path.exists(path):
+            return path
+
+    return candidate_paths[0]
+
+
+def launch(action_in, conceptsORchains, alias_model, avec_these, csv_filename_in=None):
+    """
+    Orchestration principale du pipeline de vectorisation batch.
+    Calcule les représentations vectorielles, agrège les moyennes et alimente Qdrant.
+
+    :param action_in: Mode d'exécution ('init', 'update', 'auto', 'restore').
+    :param conceptsORchains: Typologie ('concepts' ou 'chains').
+    :param alias_model: Identifiant court du modèle d'embedding ('allMin', 'distiluse', 'e5-large').
+    :param avec_these: Périmètre documentaire ('only_mono', 'only_theses', 'with_theses').
+    :param csv_filename_in: Nom ou chemin optionnel du fichier CSV d'entrée.
+    """
     root=''
     root1=''
     #cwd = str(Path.cwd())
@@ -72,7 +118,22 @@ def launch(action_in, conceptsORchains, alias_model,avec_these):
     action=action_in
     #laisser a true pour que les updates puissent passer
     nettoie_file_trv=True
+
+    init_csv_name = getattr(config, 'CSV_INIT_FILENAME', 'export_rameau.csv')
+    update_csv_name = getattr(config, 'CSV_UPDATE_FILENAME', 'export_rameau_update.csv')
+
+    # Résolution des chemins de fichiers CSV pour vérifier les dates
+    path_init_file = resolve_csv_path(init_csv_name)
+    path_update_file = resolve_csv_path(update_csv_name)
+
     train_filename = "export_rameau"
+    if csv_filename_in:
+        train_filename = os.path.splitext(os.path.basename(csv_filename_in))[0]
+    elif action == "update":
+        train_filename = os.path.splitext(os.path.basename(update_csv_name))[0]
+    else:
+        train_filename = os.path.splitext(os.path.basename(init_csv_name))[0]
+
     #si 100 alors on ne decoupe pas, si 10 alors on decoupe par (nb fichier:82) % 10 soit 8 fichiers de moyennes qui seront ensuite
     # re-moyennises en 1 seul
     #pour plus de prcision et si assez de memoire alors mettre 100
@@ -82,15 +143,15 @@ def launch(action_in, conceptsORchains, alias_model,avec_these):
     
     RameauVectors = conceptsORchains+'_'+alias_model+'_'+avec_these
     try:
-        date_init_file =str(datetime.fromtimestamp(os.path.getmtime("export_rameau.csv")))
+        date_init_file = str(datetime.fromtimestamp(os.path.getmtime(path_init_file)))
     except:
-        date_init_file="pas de fichier export_rameau.csv"
-    print("date file init:"+date_init_file)
+        date_init_file = f"pas de fichier {path_init_file}"
+    print(f"date file init ({path_init_file}): {date_init_file}")
     try:
-        date_update_file =str(datetime.fromtimestamp(os.path.getmtime("export_rameau_update.csv")))
+        date_update_file = str(datetime.fromtimestamp(os.path.getmtime(path_update_file)))
     except:
-        date_update_file="pas de fichier export_rameau_update.csv"
-    print("date file update:"+date_update_file)
+        date_update_file = f"pas de fichier {path_update_file}"
+    print(f"date file update ({path_update_file}): {date_update_file}")
     config_init = configparser.ConfigParser()
     try:
         config_init.read(root+bibprepared_filename+'_init.ini')
@@ -154,10 +215,15 @@ def launch(action_in, conceptsORchains, alias_model,avec_these):
         
         #emb_model = 'intfloat/multilingual-e5-small'   # pas mal du tout, à réévaluer
         #les fichiers update doivent finir par _update et porter le meme nom initial que le fichier initial
-        if update==True:
-            train_filename = "export_rameau_update"
+        if csv_filename_in:
+            csv_name = csv_filename_in
+            train_filename = os.path.splitext(os.path.basename(csv_filename_in))[0]
+        elif update==True:
+            csv_name = getattr(config, 'CSV_UPDATE_FILENAME', 'export_rameau_update.csv')
+            train_filename = os.path.splitext(os.path.basename(csv_name))[0]
         else:
-            train_filename = "export_rameau"
+            csv_name = getattr(config, 'CSV_INIT_FILENAME', 'export_rameau.csv')
+            train_filename = os.path.splitext(os.path.basename(csv_name))[0]
             
         if (alias_model=='allMin'):
             emb_model = 'all-MiniLM-L6-v2'
@@ -181,12 +247,13 @@ def launch(action_in, conceptsORchains, alias_model,avec_these):
         
         columns = ['PPN','THESE','TITRE','RESUME','RAMEAU','lang']
         #chargement fichier tabule
+        resolved_csv_path = resolve_csv_path(csv_name)
         print("")
         print("")
         print("")
         print("")
-        print("chargement fichier tabulé: "+train_filename+".csv et preparation")
-        training_data=pd.read_csv(root+train_filename+".csv",sep='\t',header=None, names=columns)
+        print(f"chargement fichier tabulé: {resolved_csv_path} et preparation")
+        training_data=pd.read_csv(resolved_csv_path,sep='\t',header=None, names=columns)
         #supprime mono
         if (avec_these =='only_theses'):
             training_data=training_data[training_data.THESE.notnull()]
@@ -745,6 +812,10 @@ def launch(action_in, conceptsORchains, alias_model,avec_these):
 
 
 def main():
+    """
+    Point d'entrée CLI du script de vectorisation batch.
+    Gère la validation des options, la redirection des logs et le lancement du pipeline.
+    """
     print ('MAIN')
     try:
         p = optparse.OptionParser()
@@ -752,6 +823,7 @@ def main():
         p.add_option('--conceptsORchains', '-c', default="concepts")
         p.add_option('--alias_model', '-m', default="allMin")
         p.add_option('--avec_these', '-t', default="only_mono")
+        p.add_option('--csv_filename', default="")
         options, arguments = p.parse_args()
         ok =True
         if options.action not in ['init','update','auto','restore']:
@@ -773,7 +845,7 @@ def main():
 
         if ok==True:
             sys.stdout = open('log_'+options.action + '_'+options.conceptsORchains + '_'+options.alias_model + '_'+options.avec_these +'.txt','w')
-            launch(options.action, options.conceptsORchains, options.alias_model,options.avec_these)
+            launch(options.action, options.conceptsORchains, options.alias_model, options.avec_these, options.csv_filename)
     except BaseException as e:
         print('Failed to do something: ' + str(e))
         raise
