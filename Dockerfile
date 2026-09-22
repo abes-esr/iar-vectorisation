@@ -31,7 +31,7 @@ RUN (groupadd -g 999 docker 2>/dev/null || groupadd docker) && \
 # ==============================================================================
 # Étape de Production (production / app)
 # ==============================================================================
-FROM base AS production
+FROM base AS vectorisation-image
 
 # Copie des sources de l'application
 COPY --chown=appuser:appuser src/ /app/src/
