@@ -73,8 +73,8 @@ def resolve_csv_path(filename: str) -> str:
     else:
         filename_with_ext = filename
 
-    csv_dir = getattr(config, 'CSV_DIR', './data/csv')
-    app_data_dir = getattr(config, 'APP_DATA_DIR', './data')
+    csv_dir = getattr(config, 'CSV_DIR', '/app/data/csv')
+    app_data_dir = getattr(config, 'APP_DATA_DIR', './app/data')
 
     candidate_paths = [
         os.path.join(csv_dir, filename_with_ext),
@@ -88,8 +88,10 @@ def resolve_csv_path(filename: str) -> str:
 
     for path in candidate_paths:
         if os.path.exists(path):
+            print(f"Fichier CSV trouvé : {path}")
             return path
 
+    print(f"ATTENTION : Fichier CSV '{filename_with_ext}' introuvable dans les répertoires candidats : {candidate_paths}")
     return candidate_paths[0]
 
 
@@ -104,15 +106,16 @@ def launch(action_in, conceptsORchains, alias_model, avec_these, csv_filename_in
     :param avec_these: Périmètre documentaire ('only_mono', 'only_theses', 'with_theses').
     :param csv_filename_in: Nom ou chemin optionnel du fichier CSV d'entrée.
     """
-    root=''
-    root1=''
-    #cwd = str(Path.cwd())
     cwd = str(Path.cwd())
-
     print(cwd)
-    if "/app" in cwd :
-        root='/app/'
-        root1='/app/'
+
+    # Répertoire de stockage des fichiers .pkl et .ini
+    default_pkl_dir = '/app/data/pkl' if '/app' in cwd else './data/pkl'
+    pkl_dir = getattr(config, 'PKL_DIR', default_pkl_dir)
+    os.makedirs(pkl_dir, exist_ok=True)
+    root = os.path.join(pkl_dir, '')
+    root1 = pkl_dir
+    print(f"Répertoire de stockage des fichiers PKL : {pkl_dir}")
     adress_qdrant=config.QDRANT_HOST
     port_qdrant=config.QDRANT_PORT
     action=action_in
@@ -121,6 +124,11 @@ def launch(action_in, conceptsORchains, alias_model, avec_these, csv_filename_in
 
     init_csv_name = getattr(config, 'CSV_INIT_FILENAME', 'export_rameau.csv')
     update_csv_name = getattr(config, 'CSV_UPDATE_FILENAME', 'export_rameau_update.csv')
+    if csv_filename_in:
+        if action == "update":
+            update_csv_name = csv_filename_in
+        else:
+            init_csv_name = csv_filename_in
 
     # Résolution des chemins de fichiers CSV pour vérifier les dates
     path_init_file = resolve_csv_path(init_csv_name)
@@ -687,8 +695,9 @@ def launch(action_in, conceptsORchains, alias_model, avec_these, csv_filename_in
         
         
         
-        if len(result.index) <1000:
-                print("le nombre de  vecteurs est inferieur a 1000 ce qui est trop peut pour rameau (environ 40000) il y a probablement un pb on  quit le chargement dans qdrant pour ne pas detruire la version existante")
+        min_vectors = int(getattr(config, 'QDRANT_MIN_VECTORS', 1000))
+        if len(result.index) < min_vectors:
+                print(f"le nombre de vecteurs ({len(result.index)}) est inferieur au seuil minimal configuré ({min_vectors}) ce qui est trop peu pour rameau (environ 40000). Abandon du chargement dans qdrant pour ne pas detruire la version existante.")
                 quit() 
         
         # ## Initialisation d'une instance Qdrant et création d'une collection pour stocker les données
@@ -698,39 +707,48 @@ def launch(action_in, conceptsORchains, alias_model, avec_these, csv_filename_in
         print("")
         print("")
         print("")
+        collection_name = conceptsORchains+'_'+alias_model+'_'+avec_these
         print("")
         print("qdrant delete collection..")
-        print(conceptsORchains+'_'+alias_model+'_'+avec_these)
+        print(collection_name)
         client = QdrantClient(host=adress_qdrant, port=port_qdrant)
-        client.delete_collection(collection_name=conceptsORchains+'_'+alias_model+'_'+avec_these)
-        
-        
-        
-        # In[ ]:
-        
-        print("")
-        print("")
-        print("")
-        print("")
-        print("qdrant create collection..")
-        print(conceptsORchains+'_'+alias_model+'_'+avec_these)
-        
-        client = QdrantClient(host=adress_qdrant, port=port_qdrant)
+
+        # Tentative de suppression de la collection avec repli sur la purge des points en cas de verrou système (Windows/NTFS)
+        if client.collection_exists(collection_name):
+            try:
+                client.delete_collection(collection_name=collection_name)
+            except Exception as del_err:
+                print(f"delete_collection a échoué ({del_err}). Repli sur le vidage des points existants...")
+                try:
+                    client.delete(
+                        collection_name=collection_name,
+                        points_selector=models.FilterSelector(filter=models.Filter())
+                    )
+                    print(f"Collection '{collection_name}' vidée avec succès.")
+                except Exception as clear_err:
+                    print(f"Avertissement lors du vidage des points: {clear_err}")
+
         from qdrant_client.models import VectorParams, Distance
-        if not client.collection_exists(conceptsORchains+'_'+alias_model+'_'+avec_these):
-           client.create_collection(
-              collection_name=conceptsORchains+'_'+alias_model+'_'+avec_these,
-              vectors_config=VectorParams(size=encoder.get_sentence_embedding_dimension(), distance=Distance.COSINE,on_disk=True),
-               quantization_config=models.ScalarQuantization(
-                scalar=models.ScalarQuantizationConfig(
-                    type=models.ScalarType.INT8,
-                    always_ram=True,
-                ),                             
-            ),
-            
-               
-              
-           )
+        embedding_dim = encoder.get_embedding_dimension() if hasattr(encoder, "get_embedding_dimension") else encoder.get_sentence_embedding_dimension()
+        if not client.collection_exists(collection_name):
+            print("qdrant create collection..")
+            print(collection_name)
+            try:
+                client.create_collection(
+                    collection_name=collection_name,
+                    vectors_config=VectorParams(size=embedding_dim, distance=Distance.COSINE, on_disk=True),
+                    quantization_config=models.ScalarQuantization(
+                        scalar=models.ScalarQuantizationConfig(
+                            type=models.ScalarType.INT8,
+                            always_ram=True,
+                        ),
+                    ),
+                )
+            except Exception as create_err:
+                if "already exists" in str(create_err).lower():
+                    print(f"La collection existe déjà sur le disque ({create_err}), continuation...")
+                else:
+                    raise create_err
         
         
         # In[ ]:
@@ -738,17 +756,23 @@ def launch(action_in, conceptsORchains, alias_model, avec_these, csv_filename_in
         
         print("")
         print("qdrant chargement du dataframe result")
-        client.upload_records(
+        points = [
+            models.PointStruct(
+                id=idx,
+                vector=list(doc[0]),
+                payload=dict.fromkeys("aaa", doc[1])
+            ) for idx, doc in enumerate(result.values)
+        ]
+
+        if hasattr(client, "upload_points"):
+            client.upload_points(
                 collection_name=conceptsORchains+'_'+alias_model+'_'+avec_these,
-                records=[
-                    models.Record(
-                        id=idx,
-                        #vector=encoder.encode(doc[1]).tolist(),
-                        #vector=dict.fromkeys( "bbb", doc[7]).values(),
-                        vector=list(doc[0]),
-                        payload=dict.fromkeys( "aaa",doc[1])
-                    ) for idx, doc in enumerate(result.values)
-                ]
+                points=points
+            )
+        else:
+            client.upload_records(
+                collection_name=conceptsORchains+'_'+alias_model+'_'+avec_these,
+                records=points
             )
     
         
@@ -793,17 +817,31 @@ def launch(action_in, conceptsORchains, alias_model, avec_these, csv_filename_in
         print("")
         print("")
         print("")
-        print("test requete sur : la radio")
+        test_limit = int(getattr(config, 'QDRANT_TEST_LIMIT', 6))
+        print(f"test requete sur : la radio (limit={test_limit})")
         client = QdrantClient(host=adress_qdrant, port=port_qdrant)
-        hits = client.search(
-                collection_name=conceptsORchains+'_'+alias_model+'_'+avec_these,
-                query_vector=encoder.encode("la radio").tolist(),
-                limit=6
+        collection = conceptsORchains+'_'+alias_model+'_'+avec_these
+        query_vector = encoder.encode("la radio").tolist()
+
+        if hasattr(client, "query_points"):
+            response = client.query_points(
+                collection_name=collection,
+                query=query_vector,
+                limit=test_limit
             )
+            hits = response.points
+        elif hasattr(client, "search"):
+            hits = client.search(
+                collection_name=collection,
+                query_vector=query_vector,
+                limit=test_limit
+            )
+        else:
+            hits = []
+
         load_items = []
-        
         for hit in hits:
-                load_items.append({'score': hit.score, 'label': hit.payload})
+            load_items.append({'score': hit.score, 'label': hit.payload})
         
         print(load_items)
 
@@ -844,7 +882,6 @@ def main():
             quit()
 
         if ok==True:
-            sys.stdout = open('log_'+options.action + '_'+options.conceptsORchains + '_'+options.alias_model + '_'+options.avec_these +'.txt','w')
             launch(options.action, options.conceptsORchains, options.alias_model, options.avec_these, options.csv_filename)
     except BaseException as e:
         print('Failed to do something: ' + str(e))

@@ -1,3 +1,5 @@
+import os
+import socket
 from fastapi import FastAPI
 import docker
 try:
@@ -45,11 +47,49 @@ def run_vectorization_pipeline(action: str) -> dict:
         client = docker.DockerClient(base_url=config.DOCKER_SOCK)
         device_requests = [docker.types.DeviceRequest(device_ids=['0'], capabilities=[['gpu']])] if config.ENABLE_GPU else None
 
+        # Détection automatique du chemin de volume hôte monté sur /app/data
+        volume_bind = None
+        if os.path.exists("/.dockerenv"):
+            try:
+                hostname = socket.gethostname()
+                try:
+                    current_container = client.containers.get(hostname)
+                except Exception:
+                    current_container = client.containers.get("iar-vectorisation")
+
+                for mount in current_container.attrs.get("Mounts", []):
+                    if mount.get("Destination") == "/app/data":
+                        volume_bind = mount.get("Source")
+                        print(f"Volume hôte détecté depuis le conteneur parent : {volume_bind} -> /app/data")
+                        break
+            except Exception as vol_err:
+                print(f"Impossible de détecter le volume hôte automatiquement : {vol_err}")
+
+        if not volume_bind:
+            volume_bind = os.path.abspath(config.DOCKER_VOLUME_BIND)
+
+        # Transmission des variables d'environnement au conteneur batch
+        batch_env = {
+            "QDRANT_HOST": config.QDRANT_HOST,
+            "QDRANT_PORT": str(config.QDRANT_PORT),
+            "QDRANT_TEST_LIMIT": str(getattr(config, "QDRANT_TEST_LIMIT", 6)),
+            "QDRANT_MIN_VECTORS": str(getattr(config, "QDRANT_MIN_VECTORS", 1000)),
+            "APP_DATA_DIR": config.APP_DATA_DIR,
+            "CSV_DIR": config.CSV_DIR,
+            "PKL_DIR": config.PKL_DIR,
+            "CSV_INIT_FILENAME": config.CSV_INIT_FILENAME,
+            "CSV_UPDATE_FILENAME": config.CSV_UPDATE_FILENAME,
+            "VECTORIZE_CONCEPTS_OR_CHAINS": config.VECTORIZE_CONCEPTS_OR_CHAINS,
+            "VECTORIZE_ALIAS_MODEL": config.VECTORIZE_ALIAS_MODEL,
+            "VECTORIZE_AVEC_THESE": config.VECTORIZE_AVEC_THESE,
+        }
+
         run_kwargs = {
             "network": config.DOCKER_NETWORK,
+            "environment": batch_env,
             "command": command_args,
             "volumes": {
-                config.DOCKER_VOLUME_BIND: {
+                volume_bind: {
                     "bind": "/app/data",
                     "mode": "rw",
                 }

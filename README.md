@@ -68,10 +68,10 @@ Le composant de vectorisation orchestre le traitement par lots volumineux de not
 
 ## 📄 Description des Scripts
 
-| Fichier                   | Rôle                                                                                                                                              |
-| :------------------------ | :------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **`load_qdrant_ws.py`**   | Web service REST FastAPI (Port `8100`) servant d'API d'orchestration pour lancer les tâches de vectorisation.                                    |
-| **`rameau_vectorize.py`** | Script Batch / CLI qui effectue le nettoyage des CSV, le calcul des embeddings, l'agrégation et l'ingestion dans Qdrant.                          |
+| Fichier                   | Rôle                                                                                                                     |
+| :------------------------ | :----------------------------------------------------------------------------------------------------------------------- |
+| **`load_qdrant_ws.py`**   | Web service REST FastAPI (Port `8100`) servant d'API d'orchestration pour lancer les tâches de vectorisation.            |
+| **`rameau_vectorize.py`** | Script Batch / CLI qui effectue le nettoyage des CSV, le calcul des embeddings, l'agrégation et l'ingestion dans Qdrant. |
 
 ---
 
@@ -281,6 +281,7 @@ docker network create mon_reseau
 Lancer une instance locale de **Qdrant** sur ce réseau :
 
 - **Linux / macOS & Git Bash :**
+
   ```bash
   docker run -d --name qdrant \
     --network mon_reseau \
@@ -290,12 +291,13 @@ Lancer une instance locale de **Qdrant** sur ce réseau :
   ```
 
 - **Windows — PowerShell :**
+
   ```powershell
   docker run -d `
     --name qdrant `
     --network mon_reseau `
     -p 6333:6333 `
-    -v ${PWD}/volumes/qdrant_storage:/qdrant/storage `
+    -v ${PWD}/volumes/qdrant/storage:/qdrant/storage `
     qdrant/qdrant
   ```
 
@@ -330,6 +332,7 @@ docker tag iar-vectorisation rameau_vectorize_batch:latest
 Le Web Service FastAPI écoute sur le port `8100` et monte le socket Docker de l'hôte afin de pouvoir instancier les conteneurs de vectorisation à la demande (architecture Docker-out-of-Docker) :
 
 #### 🐧 Linux & macOS (Bash / Zsh)
+
 ```bash
 docker run -d \
   --name iar-vectorisation \
@@ -343,6 +346,7 @@ docker run -d \
 ```
 
 #### 💻 Windows — PowerShell
+
 ```powershell
 docker run -d `
   --name iar-vectorisation `
@@ -356,6 +360,7 @@ docker run -d `
 ```
 
 #### 🪟 Windows — Git Bash
+
 ```bash
 docker run -d \
   --name iar-vectorisation \
@@ -369,6 +374,7 @@ docker run -d \
 ```
 
 #### 🔲 Windows — Invite de commandes (CMD)
+
 ```cmd
 docker run -d ^
   --name iar-vectorisation ^
@@ -382,6 +388,7 @@ docker run -d ^
 ```
 
 > [!IMPORTANT]
+>
 > - **Dossier des données :** Vos fichiers CSV d'entrée (`export_rameau.csv`, etc.) doivent être placés dans `./volumes/csv/` sur l'hôte, ce qui correspond à `/app/data/csv/` dans le conteneur.
 > - **Configuration Qdrant :** Si le Web Service tourne dans Docker, réglez `QDRANT_HOST=qdrant` dans votre fichier `.env` (nom du conteneur sur le réseau `mon_reseau`).
 
@@ -392,6 +399,7 @@ docker run -d ^
 Pour exécuter la vectorisation ponctuellement sans démarrer le serveur d'API (lancement direct en ligne de commande dans un conteneur éphémère `--rm`) :
 
 - **Avec accélération GPU NVIDIA (recommandé si supporté par l'hôte) :**
+
   ```bash
   docker run --rm -it \
     --network mon_reseau \
@@ -410,7 +418,7 @@ Pour exécuter la vectorisation ponctuellement sans démarrer le serveur d'API (
     python rameau_vectorize.py --action init --conceptsORchains concepts --alias_model allMin --avec_these only_mono
   ```
 
-*(Sous PowerShell, remplacez `$(pwd)` par `${PWD}` ; sous CMD, par `%cd%` ; sous Git Bash, par `/$(pwd -W)`)*
+_(Sous PowerShell, remplacez `$(pwd)` par `${PWD}` ; sous CMD, par `%cd%` ; sous Git Bash, par `/$(pwd -W)`)_
 
 ---
 
