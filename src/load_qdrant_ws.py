@@ -61,17 +61,17 @@ def run_vectorization_pipeline(action: str) -> dict:
 
         # Transmission des variables d'environnement au conteneur batch
         batch_env = {
-            "QDRANT_HOST": config.QDRANT_HOST,
-            "QDRANT_PORT": str(config.QDRANT_PORT),
-            "QDRANT_TEST_LIMIT": str(getattr(config, "QDRANT_TEST_LIMIT", 6)),
-            "QDRANT_MIN_VECTORS": str(getattr(config, "QDRANT_MIN_VECTORS", 1000)),
-            "APP_DATA_DIR": config.APP_DATA_DIR,
-            "CSV_DIR": config.CSV_DIR,
-            "PKL_DIR": config.PKL_DIR,
-            "CSV_INIT_FILENAME": config.CSV_INIT_FILENAME,
-            "CSV_UPDATE_FILENAME": config.CSV_UPDATE_FILENAME,
-            "VECTORIZE_CONCEPTS_OR_CHAINS": config.VECTORIZE_CONCEPTS_OR_CHAINS,
-            "VECTORIZE_AVEC_THESE": config.VECTORIZE_AVEC_THESE,
+            "IAR_QDRANT_HOST": config.QDRANT_HOST,
+            "IAR_QDRANT_PORT": str(config.QDRANT_PORT),
+            "IAR_QDRANT_TEST_LIMIT": str(getattr(config, "QDRANT_TEST_LIMIT", 6)),
+            "IAR_QDRANT_MIN_VECTORS": str(getattr(config, "QDRANT_MIN_VECTORS", 1000)),
+            "IAR_APP_DATA_DIR": config.APP_DATA_DIR,
+            "IAR_CSV_DIR": config.CSV_DIR,
+            "IAR_PKL_DIR": config.PKL_DIR,
+            "IAR_CSV_INIT_FILENAME": config.CSV_INIT_FILENAME,
+            "IAR_CSV_UPDATE_FILENAME": config.CSV_UPDATE_FILENAME,
+            "IAR_VECTORIZE_CONCEPTS_OR_CHAINS": config.VECTORIZE_CONCEPTS_OR_CHAINS,
+            "IAR_VECTORIZE_AVEC_THESE": config.VECTORIZE_AVEC_THESE,
         }
 
         launched_containers = []
