@@ -1,7 +1,7 @@
 # ==============================================================================
 # Étape de Base (base)
-# ==============================================================================
-FROM python:3.10-slim AS base
+# Image PyTorch avec support CUDA 12.6 / cuDNN 9 pour GPU Volta (ex: Tesla V100S)
+FROM pytorch/pytorch:2.14.0-cuda12.6-cudnn9-devel AS base
 
 # Empêcher la création de fichiers .pyc et activer la sortie immédiate des logs
 ENV PYTHONDONTWRITEBYTECODE=1 \
