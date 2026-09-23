@@ -23,9 +23,12 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --break-system-packages -r requirements.txt
 
 # Création du groupe docker et d'un utilisateur non-root pour la sécurité
-RUN (groupadd -g 999 docker 2>/dev/null || groupadd docker) && \
-    useradd -u 1000 -m -s /bin/bash appuser && \
-    usermod -aG docker appuser && \
+# Note: Dans Ubuntu 24.04 (image PyTorch), l'UID 1000 est déjà pris par l'utilisateur 'ubuntu'
+RUN (groupadd -g 999 docker 2>/dev/null || groupadd docker 2>/dev/null || true) && \
+    (userdel -r ubuntu 2>/dev/null || true) && \
+    (groupdel ubuntu 2>/dev/null || true) && \
+    (useradd -u 1000 -m -s /bin/bash appuser 2>/dev/null || useradd -m -s /bin/bash appuser) && \
+    (usermod -aG docker appuser 2>/dev/null || true) && \
     mkdir -p /app/data /app/volumes && \
     chown -R appuser:appuser /app
 
