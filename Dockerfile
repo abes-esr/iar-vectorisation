@@ -8,6 +8,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_BREAK_SYSTEM_PACKAGES=1 \
     PYTHONPATH=/app:/app/src
 
 WORKDIR /app
@@ -19,7 +20,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Copie et installation des dépendances Python
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --break-system-packages -r requirements.txt
 
 # Création du groupe docker et d'un utilisateur non-root pour la sécurité
 RUN (groupadd -g 999 docker 2>/dev/null || groupadd docker) && \
