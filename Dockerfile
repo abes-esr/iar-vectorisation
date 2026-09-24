@@ -29,7 +29,7 @@ RUN (groupadd -g 999 docker 2>/dev/null || groupadd docker 2>/dev/null || true) 
     (groupdel ubuntu 2>/dev/null || true) && \
     (useradd -u 1000 -m -s /bin/bash appuser 2>/dev/null || useradd -m -s /bin/bash appuser) && \
     (usermod -aG docker appuser 2>/dev/null || true) && \
-    mkdir -p /app/data /app/volumes && \
+    mkdir -p /app/data/csv /app/data/pkl && \
     chown -R appuser:appuser /app
 
 # ==============================================================================
