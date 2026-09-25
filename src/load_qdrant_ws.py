@@ -1,6 +1,7 @@
 import os
+import shutil
 import socket
-from fastapi import FastAPI
+from fastapi import FastAPI, UploadFile, File
 import docker
 try:
     import config
@@ -151,6 +152,72 @@ async def update_vectorization():
     Les paramètres sont issus de la configuration (config.py / .env).
     """
     return run_vectorization_pipeline("update")
+
+
+def save_uploaded_csv(file: UploadFile, target_filename: str) -> dict:
+    """
+    Enregistre un fichier CSV uploadé en flux continu dans le répertoire cible (/app/data/csv).
+    Le fichier est obligatoirement conformé sous le nom target_filename et écrase l'éventuel fichier précédent.
+
+    :param file: Fichier UploadFile transmis via FastAPI.
+    :param target_filename: Nom de fichier cible imposé (ex: config.CSV_INIT_FILENAME ou config.CSV_UPDATE_FILENAME).
+    :return: Dictionnaire contenant les métadonnées de l'opération.
+    """
+    csv_dir = getattr(config, "CSV_DIR", "/app/data/csv")
+    try:
+        os.makedirs(csv_dir, exist_ok=True)
+    except OSError:
+        # Repli pour exécution locale hors conteneur sans privilèges sur /app
+        csv_dir = os.path.join(".", "data", "csv")
+        os.makedirs(csv_dir, exist_ok=True)
+
+    # Conformation du nom de fichier cible
+    clean_filename = target_filename if target_filename.endswith(".csv") else f"{target_filename}.csv"
+    destination_path = os.path.join(csv_dir, clean_filename)
+
+    # Écriture par flux (streaming) pour supporter les fichiers volumineux sans saturer la mémoire RAM
+    # Le mode "wb" écrase automatiquement le fichier existant
+    with open(destination_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    return {
+        "status": "success",
+        "filename": clean_filename,
+        "original_filename": file.filename,
+        "message": f"Fichier enregistré sous '{clean_filename}'",
+    }
+
+
+@app.post("/init/upload")
+async def upload_init_file(file: UploadFile = File(...)):
+    """
+    Upload du fichier CSV pour l'initialisation RAMEAU (/init).
+    Conforme le nom du fichier vers config.CSV_INIT_FILENAME (par défaut 'export_rameau.csv')
+    et écrase le fichier précédent dans /app/data/csv.
+
+    Exemple d'utilisation :
+    curl -X POST -F "file=@mon_export.csv" http://localhost:8100/init/upload
+
+    :param file: Fichier CSV transmis en multipart/form-data.
+    :return: Dictionnaire confirmant la sauvegarde, le nom conformé et l'écrasement.
+    """
+    return save_uploaded_csv(file, config.CSV_INIT_FILENAME)
+
+
+@app.post("/update/upload")
+async def upload_update_file(file: UploadFile = File(...)):
+    """
+    Upload du fichier CSV pour la mise à jour différentielle RAMEAU (/update).
+    Conforme le nom du fichier vers config.CSV_UPDATE_FILENAME (par défaut 'export_rameau_update.csv')
+    et écrase le fichier précédent dans /app/data/csv.
+
+    Exemple d'utilisation :
+    curl -X POST -F "file=@mon_delta.csv" http://localhost:8100/update/upload
+
+    :param file: Fichier CSV transmis en multipart/form-data.
+    :return: Dictionnaire confirmant la sauvegarde, le nom conformé et l'écrasement.
+    """
+    return save_uploaded_csv(file, config.CSV_UPDATE_FILENAME)
 
 
 if __name__ == "__main__":

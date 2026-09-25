@@ -94,6 +94,22 @@ Déclenche la mise à jour différentielle du corpus vectoriel RAMEAU à partir 
 curl -X POST "http://localhost:8100/update"
 ```
 
+### 3. `POST /init/upload`
+
+Permet d'uploader le fichier CSV d'initialisation. Le fichier est automatiquement conformé sous le nom attendu par l'initialisation (`export_rameau.csv` ou configuré via `IAR_CSV_INIT_FILENAME`) et écrase le fichier précédent dans `/app/data/csv`.
+
+```bash
+curl -X POST -F "file=@mon_export.csv" "http://localhost:8100/init/upload"
+```
+
+### 4. `POST /update/upload`
+
+Permet d'uploader le fichier CSV de mise à jour différentielle. Le fichier est automatiquement conformé sous le nom attendu par la mise à jour (`export_rameau_update.csv` ou configuré via `IAR_CSV_UPDATE_FILENAME`) et écrase le fichier précédent dans `/app/data/csv`.
+
+```bash
+curl -X POST -F "file=@mon_delta.csv" "http://localhost:8100/update/upload"
+```
+
 ---
 
 ## 💻 Pipeline de Vectorisation Batch (`rameau_vectorize.py`)
