@@ -3,6 +3,8 @@
 [![Docker Pulls](https://img.shields.io/docker/pulls/abesesr/iar.svg)](https://hub.docker.com/r/abesesr/iar/)
 [![Buildx Publish](https://github.com/abes-esr/iar-vectorisation/actions/workflows/buildx-pubtodockerhub.yml/badge.svg)](https://github.com/abes-esr/iar-vectorisation/actions/workflows/buildx-pubtodockerhub.yml)
 
+> 📌 **Rôle central du dépôt `iar-docker`** : Le dépôt [**iar-docker**](https://github.com/abes-esr/iar-docker) centralise l'état et le stockage de tous les services de la plateforme. En cas d'incident majeur ou de réinstallation complète d'un serveur, la restauration est opérée depuis ce dossier. Pour la restauration de l'application, veuillez vous référer à sa documentation : [iar-docker - Procédure de restauration globale](https://github.com/abes-esr/iar-docker#8-procédure-de-restauration-globale).
+
 ---
 
 ## 📌 Sommaire
@@ -15,8 +17,7 @@
 - [6. Diagramme d'architecture](#6-diagramme-darchitecture)
 - [7. Procédure de déploiement / d'installation](#7-procédure-de-déploiement--dinstallation)
 - [8. Procédure de supervision](#8-procédure-de-supervision)
-- [9. Procédure de restauration](#9-procédure-de-restauration)
-- [10. Procédure de testing](#10-procédure-de-testing)
+- [9. Procédure de testing](#9-procédure-de-testing)
 
 ---
 
@@ -438,59 +439,7 @@ Les métriques serveurs et conteneurs sont agrégées sur les instances Grafana 
 
 ---
 
-## 9. Procédure de restauration
-
-En cas d'incident matériel, de corruption d'une collection vectorielle ou de réinstallation sur une nouvelle machine hôte, trois niveaux de restauration sont disponibles :
-
-### Étape 1 : Récupération globale du répertoire hôte via `rsync`
-
-Les sauvegardes périodiques de l'ABES sont centralisées sur les serveurs de stockage dédiés (`socorro.abes.fr` / `sotora.abes.fr`). Une commande unique permet de restaurer l'environnement complet de déploiement [`iar-docker`](https://github.com/abes-esr/iar-docker) (incluant les volumes de données et les snapshots) :
-
-```bash
-# Restauration globale du répertoire d'exploitation depuis la machine de backup
-rsync -avzP socorro.abes.fr:/backup/donut-prod/opt/pod/iar-docker/ /opt/pod/iar-docker/
-```
-
----
-
-### Étape 2 : Sauvegarde et Restauration des snapshots Qdrant
-
-Qdrant dispose d'un mécanisme natif de snapshots binaires par collection.
-
-#### Création d'un snapshot à chaud :
-```bash
-# Générer un instantané pour la collection concepts_allMin_only_mono
-curl -X POST "http://localhost:6333/collections/concepts_allMin_only_mono/snapshots"
-```
-
-#### Restauration d'un snapshot via l'API Qdrant :
-```bash
-# 1. Restauration de la collection principale allMin
-curl -X PUT -F "snapshot=@/opt/pod/iar-docker/volumes/qdrant/snapshots/concepts_allMin_only_mono.snapshot" \
-  "http://localhost:6333/collections/concepts_allMin_only_mono/snapshots/upload"
-
-# 2. Restauration de la collection multilingue e5-large
-curl -X PUT -F "snapshot=@/opt/pod/iar-docker/volumes/qdrant/snapshots/concepts_e5-large_only_mono.snapshot" \
-  "http://localhost:6333/collections/concepts_e5-large_only_mono/snapshots/upload"
-```
-
----
-
-### Étape 3 : Restauration rapide depuis l'archive vectorielle `.pkl`
-
-Si la collection Qdrant est supprimée ou corrompue mais que les vecteurs calculés existent dans [`volumes/pkl/archive_*.pkl`](./volumes/pkl/), le mode `--action restore` de `rameau_vectorize.py` permet de recréer et ré-ingérer instantanément les points sans recalculer les inférences :
-
-```bash
-python src/rameau_vectorize.py \
-  --action restore \
-  --conceptsORchains concepts \
-  --alias_model allMin \
-  --avec_these only_mono
-```
-
----
-
-## 10. Procédure de testing
+## 9. Procédure de testing
 
 La validation technique et sémantique s'articule autour des scripts du répertoire [`test/`](./test/) :
 
