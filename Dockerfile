@@ -51,7 +51,7 @@ EXPOSE 8100
 
 # Vérification de l'état de santé du service
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
-    CMD curl -f http://localhost:8100/ || exit 1
+    CMD curl -f http://localhost:8100/health || exit 1
 
 # Commande par défaut : lancement du web service FastAPI
 CMD ["uvicorn", "load_qdrant_ws:app", "--host", "0.0.0.0", "--port", "8100"]

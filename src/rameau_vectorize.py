@@ -1,27 +1,11 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-#docker
-'''
-sudo docker images
-docker network create mon_reseau
-sudo docker run -p 6333:6333  --network mon_reseau  -d -v /home/ubuntu/qdrant/data:/qdrant/storage     qdrant/qdrant
-sudo docker rmi -f 64d7215c2aa0
-
-pour le service web
-sudo docker run --network mon_reseau --gpus all -v /home/ubuntu/cbd/docker/rameau_service:/app -i -t -p 8069:8069 fb2dff3dae3b
-
-
-pour autoriser le repertoire en ecriture a ubuntu , sur le repertoire feire :
-sudo chown -R ubuntu: "$PWD"
-pour builder les eux
-sudo docker build -t rameau_service:v1 .
-sudo docker build -t rameau_vectorize_service:v1 .
- si pas root: sudo docker run --network mon_reseau --gpus all -v /home/ubuntu/cbd/docker/rameau_vectorize_service:/app -u $(id -u):$(id -g) -i -t -p 8100:8100 fb2dff3dae3b
-
- sudo docker run --network mon_reseau --gpus all -v /home/ubuntu/cbd/docker/rameau_vectorize_service:/app -u $(id -u):$(id -g) -i -t -p 8100:8100 fb2dff3dae3b
-pour recuperer le localhost de qdrant il faut faire un ifconfig recuperer l'ip du docker et le mettre dans global_init.ini
-'''
+"""
+Module de vectorisation batch et d'ingestion des autorités RAMEAU dans Qdrant.
+Calcule les représentations vectorielles (SentenceTransformers), agrège les barycentres
+par vedette-matière et insère les points dans Qdrant.
+"""
 
 # la procedure oracle de traitement sur la base xml est QE_EXPORT_RAMEAU
 # pour initier les serveurs ; 
@@ -48,10 +32,9 @@ import os
 import configparser
 import optparse
 import sys
-try:
-    import config
-except ImportError:
-    from src import config
+# Assure la résolution directe de config quel que soit le contexte d'exécution (racine ou src)
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import config
 
 
 # In[5]:
